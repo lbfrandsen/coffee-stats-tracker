@@ -1,7 +1,14 @@
 .DS_Store
+
+# Environment files
 .env
+.env.*
+!.env.example
+
+# Node
 /node_modules/
 *.tsbuildinfo
+dist/
 
 # React Router
 /.react-router/
@@ -12,6 +19,9 @@
 .wrangler
 .dev.vars*
 worker-configuration.d.ts
-
 !.dev.vars.example
-!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
