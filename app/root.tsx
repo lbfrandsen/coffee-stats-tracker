@@ -49,7 +49,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    <div className="min-h-svh bg-zinc-950 text-zinc-50">
+    <div className="flex min-h-svh flex-col bg-zinc-950 text-zinc-50">
       <header className="border-b border-zinc-800 bg-zinc-950">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-center px-4 sm:px-6 lg:px-8">
           <h1 className="text-center text-lg font-semibold uppercase tracking-[0.18em] text-zinc-100">
@@ -93,10 +93,15 @@ export default function App() {
           </NavigationMenu>
         </div>
       </nav>
-
-      <main>
+      <main className="flex-1">
         <Outlet />
       </main>
+      <footer className="border-t border-zinc-800 bg-zinc-950">
+        <div className="mx-auto flex h-14 max-w-6xl items-center justify-center px-4 text-sm text-zinc-500 sm:px-6 lg:px-8">
+          © {new Date().getFullYear()} Lucas Bjerg Frandsen. All rights
+          reserved.
+        </div>
+      </footer>
     </div>
   );
 }

@@ -51,9 +51,9 @@ const DRINKS_PAGE_SIZE = 15;
 const leaderboardRows = [
   {
     rank: 1,
-    name: "Pending",
-    cups: "—",
-    lastCup: "Waiting for coffee events",
+    name: "Placeholder",
+    cups: "N/A",
+    lastCup: "No drinks yet.",
   },
 ];
 
@@ -235,9 +235,8 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                 <TableHead className="text-zinc-400">Person</TableHead>
                 <TableHead className="text-zinc-400">Cup</TableHead>
                 <TableHead className="text-zinc-400">NFC UID</TableHead>
-                <TableHead className="text-zinc-400">Consumed</TableHead>
-                <TableHead className="text-zinc-400">Received</TableHead>
-                <TableHead className="text-zinc-400">Event</TableHead>
+                <TableHead className="text-zinc-400">Consumed at</TableHead>
+                <TableHead className="text-zinc-400">Received at</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -259,9 +258,6 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                     </TableCell>
                     <TableCell className="text-zinc-400">
                       {formatDateTime(drink.received_at)}
-                    </TableCell>
-                    <TableCell className="max-w-44 truncate font-mono text-xs text-zinc-500">
-                      {drink.event_id}
                     </TableCell>
                   </TableRow>
                 ))
