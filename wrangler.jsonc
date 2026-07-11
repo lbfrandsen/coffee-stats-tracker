@@ -16,7 +16,15 @@
 	"upload_source_maps": true,
 	"compatibility_flags": [
 		"nodejs_compat"
-	]
+	],
+
+	  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "coffee-stats-tracker",
+      "database_id": "71dc4b83-c140-489a-b467-8e9b12e1bd5f"
+    }
+  ]
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
