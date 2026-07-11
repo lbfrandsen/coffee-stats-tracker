@@ -1,19 +1,22 @@
-import { env } from "cloudflare:workers";
-
 import type { Route } from "./+types/home";
-import { Welcome } from "../welcome/welcome";
 
 export function meta({}: Route.MetaArgs) {
   return [
-    { title: "New React Router App" },
-    { name: "description", content: "Welcome to React Router!" },
+    { title: "Kaffe Maendene" },
+    {
+      name: "description",
+      content: "Coffee tracking dashboard",
+    },
   ];
 }
 
-export function loader() {
-  return { message: env.VALUE_FROM_CLOUDFLARE };
-}
-
-export default function Home({ loaderData }: Route.ComponentProps) {
-  return <Welcome message={loaderData.message} />;
+export default function Home() {
+  return (
+    <>
+      <section
+        id="leaderboard"
+        className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8"
+      />
+    </>
+  );
 }
