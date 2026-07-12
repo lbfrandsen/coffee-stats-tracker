@@ -261,7 +261,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
               <TableRow className="border-zinc-800 hover:bg-transparent">
                 <TableHead className="w-20 text-zinc-400">ID</TableHead>
                 <TableHead className="text-zinc-400">Person</TableHead>
-                <TableHead className="text-zinc-400">Cup</TableHead>
+                <TableHead className="text-zinc-400">Mug</TableHead>
                 <TableHead className="text-zinc-400">Consumed at</TableHead>
                 <TableHead className="text-zinc-400">Received at</TableHead>
               </TableRow>

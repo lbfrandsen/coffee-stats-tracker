@@ -52,7 +52,7 @@ export default function App() {
     <div className="flex min-h-svh flex-col bg-zinc-950 text-zinc-50">
       <header className="border-b border-zinc-800 bg-zinc-950">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-center px-4 sm:px-6 lg:px-8">
-          <h1 className="text-center text-lg font-semibold uppercase tracking-[0.18em] text-zinc-100">
+          <h1 className="text-center text-xl font-semibold uppercase tracking-[0.4em] text-zinc-100">
             KAFFEMÆNDENE
           </h1>
         </div>
@@ -70,7 +70,7 @@ export default function App() {
                   href="/"
                   className="px-3 font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50 focus:bg-zinc-800 focus:text-zinc-50"
                 >
-                  Leaderboard
+                  Home
                 </NavigationMenuLink>
               </NavigationMenuItem>
               <NavigationMenuItem>
