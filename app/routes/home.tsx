@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 
 import type { Route } from "./+types/home";
 import {
+  CardAction,
   Card,
   CardContent,
   CardDescription,
@@ -9,6 +10,15 @@ import {
   CardHeader,
   CardTitle,
 } from "~/components/ui/card";
+import { Button } from "~/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "~/components/ui/dialog";
 import {
   Pagination,
   PaginationContent,
@@ -30,6 +40,13 @@ import {
 type PersonRow = {
   name: string;
   display_name: string | null;
+};
+
+// Cups popup data table
+type CupRow = {
+  id: number;
+  name: string;
+  owner_name: string;
 };
 
 // All drinks data table
@@ -81,10 +98,21 @@ export async function loader({ request }: Route.LoaderArgs) {
       : 1;
 
   try {
-    const [peopleResult, drinksCount] = await Promise.all([
+    const [peopleResult, cupsResult, drinksCount] = await Promise.all([
       env.DB.prepare(
         "SELECT name, display_name FROM persons ORDER BY name COLLATE NOCASE ASC",
       ).all<PersonRow>(),
+      env.DB.prepare(
+        `
+          SELECT
+            c.id,
+            c.name,
+            COALESCE(p.display_name, p.name) AS owner_name
+          FROM cups c
+          JOIN persons p ON p.id = c.owner_id
+          ORDER BY c.id ASC
+        `,
+      ).all<CupRow>(),
       env.DB.prepare("SELECT COUNT(*) AS total FROM drinks").first<CountRow>(),
     ]);
 
@@ -133,6 +161,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
     return {
       people: peopleResult.results,
+      cups: cupsResult.results,
       leaderboardRows: leaderboardResult.results,
       allDrinksRows: drinksResult.results,
       drinksPagination: {
@@ -147,6 +176,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
     return {
       people: [],
+      cups: [],
       leaderboardRows: [],
       allDrinksRows: [],
       drinksPagination: {
@@ -160,7 +190,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export default function Home({ loaderData }: Route.ComponentProps) {
-  const { people, leaderboardRows, allDrinksRows, drinksPagination } =
+  const { people, cups, leaderboardRows, allDrinksRows, drinksPagination } =
     loaderData;
   const paginationPages = getVisiblePages(
     drinksPagination.page,
@@ -217,6 +247,69 @@ export default function Home({ loaderData }: Route.ComponentProps) {
       <Card className="border-zinc-800 bg-zinc-950/80 lg:col-span-1">
         <CardHeader className="border-b border-zinc-800">
           <CardTitle>People</CardTitle>
+          <CardAction>
+            <Dialog>
+              <DialogTrigger
+                render={
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="cursor-pointer bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100"
+                  />
+                }
+              >
+                Cups
+              </DialogTrigger>
+              <DialogContent className="border border-zinc-800 bg-zinc-950 text-zinc-50 sm:max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle>Cups</DialogTitle>
+                  <DialogDescription>
+                    <p>
+                      Her er alle vores kopper. Hver mand har sin egen, så vi
+                      kan stole på statistikken.
+                    </p>
+                    <p>
+                      Det er en dødssynd, at drikke af en anden mands kop. Det
+                      er fucking ikke for sjov det her.
+                    </p>
+                  </DialogDescription>
+                </DialogHeader>
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-zinc-800 hover:bg-transparent">
+                      <TableHead className="w-20 text-zinc-400">ID</TableHead>
+                      <TableHead className="text-zinc-400">Cup name</TableHead>
+                      <TableHead className="text-zinc-400">Owner</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {cups.length > 0 ? (
+                      cups.map((cup) => (
+                        <TableRow key={cup.id} className="border-zinc-800">
+                          <TableCell className="font-medium text-zinc-300">
+                            {cup.id}
+                          </TableCell>
+                          <TableCell>{cup.name}</TableCell>
+                          <TableCell className="text-zinc-400">
+                            {cup.owner_name}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow className="border-zinc-800">
+                        <TableCell
+                          colSpan={3}
+                          className="h-24 text-center text-zinc-400"
+                        >
+                          No cups loaded yet.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </DialogContent>
+            </Dialog>
+          </CardAction>
         </CardHeader>
         <CardContent>
           <Table>
