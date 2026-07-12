@@ -26,11 +26,13 @@ import {
   TableRow,
 } from "~/components/ui/table";
 
+// Persons data table
 type PersonRow = {
   name: string;
   display_name: string | null;
 };
 
+// All drinks data table
 type DrinkRow = {
   id: number;
   event_id: string;
@@ -42,20 +44,20 @@ type DrinkRow = {
   received_at: string;
 };
 
+// Leaderboard data table
+type LeaderboardRow = {
+  rank: number;
+  name: string;
+  cups: number;
+  lastCup: string | null;
+};
+
+// Count data table, to show total number of drinks in the database
 type CountRow = {
   total: number;
 };
 
 const DRINKS_PAGE_SIZE = 15;
-
-const leaderboardRows = [
-  {
-    rank: 1,
-    name: "Placeholder",
-    cups: "N/A",
-    lastCup: "No drinks yet.",
-  },
-];
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -90,6 +92,24 @@ export async function loader({ request }: Route.LoaderArgs) {
     const totalPages = Math.max(1, Math.ceil(totalDrinks / DRINKS_PAGE_SIZE));
     const currentDrinksPage = Math.min(drinksPage, totalPages);
     const drinksOffset = (currentDrinksPage - 1) * DRINKS_PAGE_SIZE;
+
+    const leaderboardResult = await env.DB.prepare(
+      `
+        SELECT
+          ROW_NUMBER() OVER (
+            ORDER BY COUNT(d.id) DESC, MAX(d.consumed_at) DESC, p.name COLLATE NOCASE ASC
+          ) AS rank,
+          COALESCE(p.display_name, p.name) AS name,
+          COUNT(d.id) AS cups,
+          MAX(d.consumed_at) AS last_cup
+        FROM persons p
+        LEFT JOIN drinks d ON d.person_id = p.id
+        WHERE p.active = 1
+        GROUP BY p.id, p.name, p.display_name
+        ORDER BY rank ASC
+      `,
+    ).all<LeaderboardRow>();
+
     const drinksResult = await env.DB.prepare(
       `
         SELECT
@@ -113,6 +133,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
     return {
       people: peopleResult.results,
+      leaderboardRows: leaderboardResult.results,
       allDrinksRows: drinksResult.results,
       drinksPagination: {
         page: currentDrinksPage,
@@ -126,6 +147,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
     return {
       people: [],
+      leaderboardRows: [],
       allDrinksRows: [],
       drinksPagination: {
         page: 1,
@@ -138,7 +160,8 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export default function Home({ loaderData }: Route.ComponentProps) {
-  const { people, allDrinksRows, drinksPagination } = loaderData;
+  const { people, leaderboardRows, allDrinksRows, drinksPagination } =
+    loaderData;
   const paginationPages = getVisiblePages(
     drinksPagination.page,
     drinksPagination.totalPages,
@@ -149,9 +172,6 @@ export default function Home({ loaderData }: Route.ComponentProps) {
       <Card className="border-zinc-800 bg-zinc-950/80 lg:col-span-3">
         <CardHeader className="border-b border-zinc-800">
           <CardTitle>Leaderboard</CardTitle>
-          <CardDescription>
-            Who's got the biggest caffeine problem?
-          </CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
@@ -166,18 +186,29 @@ export default function Home({ loaderData }: Route.ComponentProps) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {leaderboardRows.map((row) => (
-                <TableRow key={row.rank} className="border-zinc-800">
-                  <TableCell className="font-medium text-zinc-300">
-                    {row.rank}
-                  </TableCell>
-                  <TableCell>{row.name}</TableCell>
-                  <TableCell className="text-right">{row.cups}</TableCell>
-                  <TableCell className="text-right text-zinc-400">
-                    {row.lastCup}
+              {leaderboardRows.length > 0 ? (
+                leaderboardRows.map((row) => (
+                  <TableRow key={row.rank} className="border-zinc-800">
+                    <TableCell className="font-medium text-zinc-300">
+                      {row.rank}
+                    </TableCell>
+                    <TableCell>{row.name}</TableCell>
+                    <TableCell className="text-right">{row.cups}</TableCell>
+                    <TableCell className="text-right text-zinc-400">
+                      {row.lastCup ? formatDateTime(row.lastCup) : "-"}
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow className="border-zinc-800">
+                  <TableCell
+                    colSpan={4}
+                    className="h-24 text-center text-zinc-400"
+                  >
+                    No leaderboard data yet.
                   </TableCell>
                 </TableRow>
-              ))}
+              )}
             </TableBody>
           </Table>
         </CardContent>
@@ -223,9 +254,6 @@ export default function Home({ loaderData }: Route.ComponentProps) {
       <Card className="border-zinc-800 bg-zinc-950/80 lg:col-span-4">
         <CardHeader className="border-b border-zinc-800">
           <CardTitle>All Drinks</CardTitle>
-          <CardDescription>
-            Latest registered drinks from the database.
-          </CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
@@ -234,7 +262,6 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                 <TableHead className="w-20 text-zinc-400">ID</TableHead>
                 <TableHead className="text-zinc-400">Person</TableHead>
                 <TableHead className="text-zinc-400">Cup</TableHead>
-                <TableHead className="text-zinc-400">NFC UID</TableHead>
                 <TableHead className="text-zinc-400">Consumed at</TableHead>
                 <TableHead className="text-zinc-400">Received at</TableHead>
               </TableRow>
@@ -250,9 +277,6 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                       {drink.person_display_name || drink.person_name}
                     </TableCell>
                     <TableCell>{drink.cup_name}</TableCell>
-                    <TableCell className="font-mono text-xs text-zinc-400">
-                      {drink.nfc_uid}
-                    </TableCell>
                     <TableCell className="text-zinc-400">
                       {formatDateTime(drink.consumed_at)}
                     </TableCell>
@@ -264,7 +288,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
               ) : (
                 <TableRow className="border-zinc-800">
                   <TableCell
-                    colSpan={7}
+                    colSpan={5}
                     className="h-24 text-center text-zinc-400"
                   >
                     No drinks loaded yet.
