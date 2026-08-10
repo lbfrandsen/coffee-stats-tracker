@@ -25,6 +25,20 @@ type ScannedCupRow = {
   display_name: string | null;
 };
 
+type HeartbeatRequest = {
+  reportedAt: string;
+  serviceStatus: string;
+  readerConnected: boolean;
+  uptimeSeconds: number | null;
+  memoryUsagePercent: number | null;
+  diskUsagePercent: number | null;
+  cpuTemperatureCelsius: number | null;
+  lastScanAt: string | null;
+  lastUploadAt: string | null;
+  pendingEvents: number;
+  appVersion: string | null;
+};
+
 async function handleScan(request: Request, env: Env): Promise<Response> {
   if (request.method !== "POST") {
     return Response.json(
@@ -127,6 +141,101 @@ async function handleScan(request: Request, env: Env): Promise<Response> {
   });
 }
 
+async function handleHeartbeat(request: Request, env: Env): Promise<Response> {
+  if (request.method !== "POST") {
+    return Response.json(
+      { error: "method_not_allowed" },
+      {
+        status: 405,
+        headers: {
+          Allow: "POST",
+        },
+      },
+    );
+  }
+
+  const authorization = request.headers.get("Authorization");
+
+  if (authorization !== `Bearer ${env.PI_DEVICE_TOKEN}`) {
+    return Response.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  let body: HeartbeatRequest;
+
+  try {
+    body = await request.json<HeartbeatRequest>();
+  } catch {
+    return Response.json({ error: "invalid_json" }, { status: 400 });
+  }
+
+  const {
+    reportedAt,
+    serviceStatus,
+    readerConnected,
+    uptimeSeconds,
+    memoryUsagePercent,
+    diskUsagePercent,
+    cpuTemperatureCelsius,
+    lastScanAt,
+    lastUploadAt,
+    pendingEvents,
+    appVersion,
+  } = body;
+
+  if (
+    typeof reportedAt !== "string" ||
+    typeof serviceStatus !== "string" ||
+    typeof readerConnected !== "boolean" ||
+    typeof pendingEvents !== "number"
+  ) {
+    return Response.json({ error: "invalid_request" }, { status: 400 });
+  }
+
+  try {
+    const result = await env.DB.prepare(
+      `
+        INSERT INTO heartbeats (
+          reported_at,
+          service_status,
+          reader_connected,
+          uptime_seconds,
+          memory_usage_percent,
+          disk_usage_percent,
+          cpu_temperature_celsius,
+          last_scan_at,
+          last_upload_at,
+          pending_events,
+          app_version
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    )
+      .bind(
+        reportedAt,
+        serviceStatus,
+        readerConnected ? 1 : 0,
+        uptimeSeconds,
+        memoryUsagePercent,
+        diskUsagePercent,
+        cpuTemperatureCelsius,
+        lastScanAt,
+        lastUploadAt,
+        pendingEvents,
+        appVersion,
+      )
+      .run();
+
+    return Response.json({
+      ok: true,
+      heartbeatId: result.meta.last_row_id,
+    });
+  } catch (error) {
+    console.error("Failed to insert heartbeat:", error);
+
+    return Response.json({ error: "database_error" }, { status: 500 });
+  }
+}
+
 const requestHandler = createRequestHandler(
   () => import("virtual:react-router/server-build"),
   import.meta.env.MODE,
@@ -138,6 +247,10 @@ export default {
 
     if (url.pathname === "/api/scans") {
       return handleScan(request, env);
+    }
+
+    if (url.pathname === "/api/heartbeats") {
+      return handleHeartbeat(request, env);
     }
 
     const routerContext = new RouterContextProvider();

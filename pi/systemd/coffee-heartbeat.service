@@ -1,0 +1,13 @@
+[Unit]
+Description=Coffee Tracker Heartbeat
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=lucasfrandsen
+WorkingDirectory=/home/lucasfrandsen/apps/coffee-tracker/pi
+
+EnvironmentFile=/home/lucasfrandsen/apps/coffee-tracker/pi/.env
+
+ExecStart=/home/lucasfrandsen/apps/coffee-tracker/pi/.venv/bin/python -u /home/lucasfrandsen/apps/coffee-tracker/pi/src/heartbeat.py
