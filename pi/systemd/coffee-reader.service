@@ -1,0 +1,20 @@
+[Unit]
+Description=Coffee NFC Reader
+After=network-online.target pcscd.socket
+Wants=network-online.target
+Requires=pcscd.socket
+
+[Service]
+Type=simple
+User=lucasfrandsen
+WorkingDirectory=/home/lucasfrandsen/apps/coffee-tracker/pi
+
+EnvironmentFile=/home/lucasfrandsen/apps/coffee-tracker/pi/.env
+
+ExecStart=/home/lucasfrandsen/apps/coffee-tracker/pi/.venv/bin/python -u /home/lucasfrandsen/apps/coffee-tracker/pi/src/reader.py
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
