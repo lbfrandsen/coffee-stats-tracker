@@ -25,6 +25,12 @@ import {
   TableHeader,
   TableRow,
 } from "~/components/ui/table";
+import {
+  formatDateTime,
+  formatRelativeAge,
+  formatTime,
+  getTimestampMilliseconds,
+} from "~/lib/date-time";
 
 type HeartbeatRow = {
   id: number;
@@ -63,6 +69,7 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
+  const statusEvaluatedAt = Date.now();
   const url = new URL(request.url);
   const requestedHeartbeatsPage = Number.parseInt(
     url.searchParams.get("heartbeatsPage") ?? "1",
@@ -102,7 +109,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     ]);
 
     const totalHeartbeats = countRow?.total ?? 0;
-    const deviceStatus = getDeviceStatus(latestHeartbeat?.received_at ?? null);
+    const deviceStatus = getDeviceStatus(
+      latestHeartbeat?.received_at ?? null,
+      statusEvaluatedAt,
+    );
     const totalPages = Math.max(
       1,
       Math.ceil(totalHeartbeats / HEARTBEATS_PER_PAGE),
@@ -138,6 +148,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       heartbeats: results,
       latestHeartbeat,
       deviceStatus,
+      statusEvaluatedAt,
       heartbeatsPagination: {
         page: currentHeartbeatsPage,
         pageSize: HEARTBEATS_PER_PAGE,
@@ -152,6 +163,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       heartbeats: [],
       latestHeartbeat: null,
       deviceStatus: "offline" satisfies DeviceStatus,
+      statusEvaluatedAt,
       heartbeatsPagination: {
         page: 1,
         pageSize: HEARTBEATS_PER_PAGE,
@@ -163,7 +175,12 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export default function Status({ loaderData }: Route.ComponentProps) {
-  const { heartbeats, heartbeatsPagination, latestHeartbeat } = loaderData;
+  const {
+    heartbeats,
+    heartbeatsPagination,
+    latestHeartbeat,
+    statusEvaluatedAt,
+  } = loaderData;
   const deviceStatus = loaderData.deviceStatus as DeviceStatus;
   const paginationPages = getVisiblePages(
     heartbeatsPagination.page,
@@ -190,7 +207,10 @@ export default function Status({ loaderData }: Route.ComponentProps) {
             />
             <StatusMetric
               label="Last heartbeat"
-              value={formatRelativeAge(latestHeartbeat?.received_at ?? null)}
+              value={formatRelativeAge(
+                latestHeartbeat?.received_at ?? null,
+                statusEvaluatedAt,
+              )}
             />
             <StatusMetric
               label="NFC reader"
@@ -436,23 +456,11 @@ function getVisiblePages(currentPage: number, totalPages: number) {
 }
 
 function formatOptionalDateTime(value: string | null) {
-  return value ? formatDateTime(value) : "—";
+  return formatDateTime(value);
 }
 
 function formatOptionalTime(value: string | null) {
-  return value
-    ? new Intl.DateTimeFormat("en", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }).format(new Date(value))
-    : "—";
-}
-
-function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat("en", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+  return formatTime(value);
 }
 
 function formatPercent(value: number | null) {
@@ -483,12 +491,17 @@ function formatUptime(value: number | null) {
   return `${minutes}m`;
 }
 
-function getDeviceStatus(receivedAt: string | null): DeviceStatus {
-  if (!receivedAt) {
+function getDeviceStatus(
+  receivedAt: string | null,
+  statusEvaluatedAt: number,
+): DeviceStatus {
+  const receivedAtMs = getTimestampMilliseconds(receivedAt);
+
+  if (receivedAtMs === null) {
     return "offline";
   }
 
-  const ageMs = Date.now() - new Date(receivedAt).getTime();
+  const ageMs = statusEvaluatedAt - receivedAtMs;
 
   if (ageMs < ONLINE_THRESHOLD_MS) {
     return "online";
@@ -529,37 +542,6 @@ function getStatusStyles(status: DeviceStatus) {
     foregroundColor: "oklch(0.971 0.013 17.38)",
     text: "text-red-300",
   };
-}
-
-function formatRelativeAge(value: string | null) {
-  if (!value) {
-    return "No heartbeat";
-  }
-
-  const elapsedSeconds = Math.max(
-    0,
-    Math.floor((Date.now() - new Date(value).getTime()) / 1000),
-  );
-
-  if (elapsedSeconds < 60) {
-    return `${elapsedSeconds} seconds ago`;
-  }
-
-  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
-
-  if (elapsedMinutes < 60) {
-    return `${elapsedMinutes} minutes ago`;
-  }
-
-  const elapsedHours = Math.floor(elapsedMinutes / 60);
-
-  if (elapsedHours < 24) {
-    return `${elapsedHours} hours ago`;
-  }
-
-  const elapsedDays = Math.floor(elapsedHours / 24);
-
-  return `${elapsedDays} days ago`;
 }
 
 function formatServiceStatus(value: string | undefined) {

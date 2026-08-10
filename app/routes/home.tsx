@@ -35,6 +35,7 @@ import {
   TableHeader,
   TableRow,
 } from "~/components/ui/table";
+import { formatDateTime } from "~/lib/date-time";
 
 // Persons data table
 type PersonRow = {
@@ -454,11 +455,4 @@ function getVisiblePages(currentPage: number, totalPages: number) {
     { length: lastPage - firstPage + 1 },
     (_, index) => firstPage + index,
   );
-}
-
-function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat("en", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
 }
