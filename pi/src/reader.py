@@ -22,6 +22,7 @@ class CoffeeTagObserver(CardObserver):
         added_cards, removed_cards = handlers
 
         for card in added_cards:
+            connection = None
             try:
                 connection = card.createConnection()
                 connection.connect()
@@ -41,6 +42,13 @@ class CoffeeTagObserver(CardObserver):
 
             except CardConnectionException as error:
                 print(f"CARD CONNECTION ERROR: {error}", flush=True)
+
+            finally:
+                if connection is not None:
+                    try:
+                        connection.disconnect() 
+                    except Exception:
+                        pass
 
         for _card in removed_cards:
             print("TAG REMOVED", flush=True)
