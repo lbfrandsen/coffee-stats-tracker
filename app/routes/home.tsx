@@ -135,6 +135,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         LEFT JOIN drinks d ON d.person_id = p.id
         WHERE p.active = 1
         GROUP BY p.id, p.name, p.display_name
+        HAVING COUNT(d.id) > 0
         ORDER BY rank ASC
       `,
     ).all<LeaderboardRow>();
