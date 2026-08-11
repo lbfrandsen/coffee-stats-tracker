@@ -220,7 +220,9 @@ export default function Home({ loaderData }: Route.ComponentProps) {
               {leaderboardRows.length > 0 ? (
                 leaderboardRows.map((row) => (
                   <TableRow key={row.rank} className="border-zinc-800">
-                    <TableCell className="font-medium text-zinc-300">
+                    <TableCell
+                      className={`font-medium ${getRankTextColor(row.rank)}`}
+                    >
                       {row.rank}
                     </TableCell>
                     <TableCell>{row.name}</TableCell>
@@ -445,6 +447,14 @@ export default function Home({ loaderData }: Route.ComponentProps) {
 
 function getDrinksPageHref(page: number) {
   return `/?drinksPage=${Math.max(1, page)}`;
+}
+
+function getRankTextColor(rank: number) {
+  if (rank === 1) return "text-[#d4af37]";
+  if (rank === 2) return "text-[#c0c0c0]";
+  if (rank === 3) return "text-[#cd7f32]";
+
+  return "text-zinc-300";
 }
 
 function getVisiblePages(currentPage: number, totalPages: number) {
