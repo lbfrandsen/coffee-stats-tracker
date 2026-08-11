@@ -11,6 +11,14 @@ export const cloudflareContext = createContext<{
 
 const SCAN_AUTH_SCHEME = "Bearer";
 
+const DMI_STATION_ID = "06188"; // Sjælsmark vejrstation, skud ud til fucking Sjælsmark altså
+const DMI_OBSERVATION_URL =
+  `https://opendataapi.dmi.dk/v2/metObs/collections/observation/items` +
+  `?stationId=${DMI_STATION_ID}` +
+  `&period=latest-20-minutes` +
+  `&limit=100`;
+const DMI_REQUEST_TIMEOUT_MS = 3_000;
+
 type ScanRequest = {
   eventId: string;
   nfcUid: string;
@@ -23,6 +31,12 @@ type ScannedCupRow = {
   person_id: number;
   person_name: string;
   display_name: string | null;
+};
+
+type RecordedDrinkRow = ScannedCupRow & {
+  drink_id: number;
+  nfc_uid: string;
+  consumed_at: string;
 };
 
 type HeartbeatRequest = {
@@ -39,7 +53,39 @@ type HeartbeatRequest = {
   appVersion: string | null;
 };
 
-async function handleScan(request: Request, env: Env): Promise<Response> {
+type DmiObservationFeature = {
+  properties: {
+    parameterId: string;
+    stationId: string;
+    observed: string;
+    value: number;
+  };
+};
+
+type DmiObservationResponse = {
+  features: DmiObservationFeature[];
+};
+
+type WeatherSnapshot = {
+  temperatureC: number | null;
+  precipitationMm: number;
+  raining: boolean;
+  cloudCover: number | null;
+  humidityPercent: number | null;
+  windSpeedMs: number | null;
+  windDirectionDegrees: number | null;
+  pressureHpa: number | null;
+  visibilityM: number | null;
+  weatherCode: number | null;
+  stationId: string;
+  observedAt: string | null;
+};
+
+async function handleScan(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
   if (request.method !== "POST") {
     return Response.json(
       { error: "method_not_allowed" },
@@ -79,6 +125,7 @@ async function handleScan(request: Request, env: Env): Promise<Response> {
     return Response.json({ error: "invalid_request" }, { status: 400 });
   }
 
+  console.log("About to query cup:", nfcUid);
   const cup = await env.DB.prepare(
     `
       SELECT
@@ -97,7 +144,7 @@ async function handleScan(request: Request, env: Env): Promise<Response> {
   )
     .bind(nfcUid)
     .first<ScannedCupRow>();
-
+  console.log("Cup query finished:", cup);
   if (!cup) {
     return Response.json(
       {
@@ -108,8 +155,10 @@ async function handleScan(request: Request, env: Env): Promise<Response> {
     );
   }
 
+  let drinkId: number;
+
   try {
-    await env.DB.prepare(
+    const result = await env.DB.prepare(
       `
         INSERT INTO drinks (
           event_id,
@@ -122,23 +171,140 @@ async function handleScan(request: Request, env: Env): Promise<Response> {
     )
       .bind(eventId, cup.cup_id, cup.person_id, consumedAt)
       .run();
+
+    drinkId = result.meta.last_row_id;
   } catch (error) {
+    try {
+      const recordedDrink = await findRecordedDrink(env, eventId);
+
+      if (recordedDrink) {
+        if (
+          recordedDrink.nfc_uid !== nfcUid ||
+          recordedDrink.consumed_at !== consumedAt
+        ) {
+          return Response.json({ error: "event_id_conflict" }, { status: 409 });
+        }
+
+        ctx.waitUntil(attachWeatherToDrink(env, recordedDrink.drink_id));
+
+        return createScanResponse(eventId, recordedDrink);
+      }
+    } catch (lookupError) {
+      console.error("Failed to look up an existing drink:", lookupError);
+    }
+
     console.error("Failed to insert drink:", error);
 
     return Response.json({ error: "database_error" }, { status: 500 });
   }
 
+  ctx.waitUntil(attachWeatherToDrink(env, drinkId));
+
+  return createScanResponse(eventId, {
+    ...cup,
+    drink_id: drinkId,
+    nfc_uid: nfcUid,
+    consumed_at: consumedAt,
+  });
+}
+
+function createScanResponse(
+  eventId: string,
+  drink: RecordedDrinkRow,
+): Response {
   return Response.json({
     ok: true,
     drink: {
       eventId,
-      cupId: cup.cup_id,
-      cup: cup.cup_name,
-      personId: cup.person_id,
-      person: cup.display_name ?? cup.person_name,
-      consumedAt,
+      cupId: drink.cup_id,
+      cup: drink.cup_name,
+      personId: drink.person_id,
+      person: drink.display_name ?? drink.person_name,
+      consumedAt: drink.consumed_at,
     },
   });
+}
+
+async function findRecordedDrink(
+  env: Env,
+  eventId: string,
+): Promise<RecordedDrinkRow | null> {
+  return env.DB.prepare(
+    `
+      SELECT
+        drinks.id AS drink_id,
+        drinks.consumed_at,
+        cups.id AS cup_id,
+        cups.name AS cup_name,
+        cups.nfc_uid,
+        persons.id AS person_id,
+        persons.name AS person_name,
+        persons.display_name
+      FROM drinks
+      JOIN cups ON cups.id = drinks.cup_id
+      JOIN persons ON persons.id = drinks.person_id
+      WHERE drinks.event_id = ?
+      LIMIT 1
+    `,
+  )
+    .bind(eventId)
+    .first<RecordedDrinkRow>();
+}
+
+async function attachWeatherToDrink(env: Env, drinkId: number): Promise<void> {
+  try {
+    const existingWeather = await env.DB.prepare(
+      "SELECT id FROM weather_records WHERE drink_id = ? LIMIT 1",
+    )
+      .bind(drinkId)
+      .first<{ id: number }>();
+
+    if (existingWeather) {
+      return;
+    }
+
+    const weather = await fetchWeatherFromDmi();
+
+    await env.DB.prepare(
+      `
+        INSERT INTO weather_records (
+          drink_id,
+          temperature_c,
+          precipitation_mm,
+          raining,
+          cloud_cover,
+          humidity_percent,
+          wind_speed_ms,
+          wind_direction_degrees,
+          pressure_hpa,
+          visibility_m,
+          weather_code,
+          station_id,
+          observed_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(drink_id) DO NOTHING
+      `,
+    )
+      .bind(
+        drinkId,
+        weather.temperatureC,
+        weather.precipitationMm,
+        weather.raining ? 1 : 0,
+        weather.cloudCover,
+        weather.humidityPercent,
+        weather.windSpeedMs,
+        weather.windDirectionDegrees,
+        weather.pressureHpa,
+        weather.visibilityM,
+        weather.weatherCode,
+        weather.stationId,
+        weather.observedAt,
+      )
+      .run();
+  } catch (error) {
+    console.error(`Failed to attach weather to drink ${drinkId}:`, error);
+  }
 }
 
 async function handleHeartbeat(request: Request, env: Env): Promise<Response> {
@@ -236,6 +402,70 @@ async function handleHeartbeat(request: Request, env: Env): Promise<Response> {
   }
 }
 
+async function fetchWeatherFromDmi(): Promise<WeatherSnapshot> {
+  const response = await fetch(DMI_OBSERVATION_URL, {
+    headers: {
+      Accept: "application/geo+json",
+    },
+    signal: AbortSignal.timeout(DMI_REQUEST_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `DMI request failed: ${response.status} ${response.statusText}`,
+    );
+  }
+
+  const data = await response.json<DmiObservationResponse>();
+
+  if (data.features.length === 0) {
+    throw new Error("DMI returned 0 features");
+  }
+
+  console.log("DMI feature count:", data.features.length);
+  console.log("DMI features:", JSON.stringify(data.features, null, 2));
+
+  const latestByParameter = new Map<string, DmiObservationFeature>();
+
+  for (const feature of data.features) {
+    const parameterId = feature.properties.parameterId;
+    const existing = latestByParameter.get(parameterId);
+
+    if (
+      !existing ||
+      feature.properties.observed > existing.properties.observed
+    ) {
+      latestByParameter.set(parameterId, feature);
+    }
+  }
+
+  const value = (parameterId: string): number | null =>
+    latestByParameter.get(parameterId)?.properties.value ?? null;
+
+  const precipitationMm = value("precip_past10min") ?? 0;
+
+  const observedAt =
+    [...latestByParameter.values()]
+      .map((feature) => feature.properties.observed)
+      .sort()
+      .at(-1) ?? null;
+
+  return {
+    temperatureC: value("temp_dry"),
+    precipitationMm,
+    raining: precipitationMm > 0,
+    cloudCover: value("cloud_cover"),
+    humidityPercent: value("humidity"),
+    windSpeedMs: value("wind_speed"),
+    windDirectionDegrees: value("wind_dir"),
+    pressureHpa: value("pressure_at_sea"),
+    visibilityM: value("visibility"),
+    weatherCode: value("weather"),
+    stationId: DMI_STATION_ID,
+    observedAt,
+  };
+}
+
 const requestHandler = createRequestHandler(
   () => import("virtual:react-router/server-build"),
   import.meta.env.MODE,
@@ -246,7 +476,7 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/scans") {
-      return handleScan(request, env);
+      return handleScan(request, env, ctx);
     }
 
     if (url.pathname === "/api/heartbeats") {
