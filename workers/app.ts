@@ -15,7 +15,7 @@ const DMI_STATION_ID = "06188"; // Sjælsmark vejrstation, skud ud til fucking S
 const DMI_OBSERVATION_URL =
   `https://opendataapi.dmi.dk/v2/metObs/collections/observation/items` +
   `?stationId=${DMI_STATION_ID}` +
-  `&period=latest-20-minutes` +
+  `&period=latest-hour` +
   `&limit=100`;
 const DMI_REQUEST_TIMEOUT_MS = 3_000;
 
