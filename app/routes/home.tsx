@@ -67,7 +67,7 @@ type LeaderboardRow = {
   rank: number;
   name: string;
   cups: number;
-  lastCup: string | null;
+  last_cup: string | null;
 };
 
 // Count data table, to show total number of drinks in the database
@@ -211,7 +211,9 @@ export default function Home({ loaderData }: Route.ComponentProps) {
               <TableRow className="border-zinc-800 hover:bg-transparent">
                 <TableHead className="w-16 text-zinc-400">Rank</TableHead>
                 <TableHead className="text-zinc-400">Name</TableHead>
-                <TableHead className="text-right text-zinc-400">Cups</TableHead>
+                <TableHead className="text-right text-zinc-400">
+                  Total cups
+                </TableHead>
                 <TableHead className="text-right text-zinc-400">
                   Last cup
                 </TableHead>
@@ -229,7 +231,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                     <TableCell>{row.name}</TableCell>
                     <TableCell className="text-right">{row.cups}</TableCell>
                     <TableCell className="text-right text-zinc-400">
-                      {row.lastCup ? formatDateTime(row.lastCup) : "-"}
+                      {row.last_cup ? formatDateTime(row.last_cup) : "-"}
                     </TableCell>
                   </TableRow>
                 ))
@@ -359,8 +361,9 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                 <TableHead className="w-20 text-zinc-400">ID</TableHead>
                 <TableHead className="text-zinc-400">Person</TableHead>
                 <TableHead className="text-zinc-400">Mug</TableHead>
-                <TableHead className="text-zinc-400">Consumed at</TableHead>
-                <TableHead className="text-zinc-400">Received at</TableHead>
+                {/* Everywhere else, the following is named "consumed_at", and it's too tedious to change. "Scanned at" is ONLY for the string representation!! */}
+                <TableHead className="text-zinc-400">Scanned</TableHead>
+                <TableHead className="text-zinc-400">Received</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
