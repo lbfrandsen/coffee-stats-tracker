@@ -1,5 +1,5 @@
 const APP_LOCALE = "en-GB";
-const APP_TIME_ZONE = "Europe/Copenhagen";
+export const APP_TIME_ZONE = "Europe/Copenhagen";
 const EMPTY_DATE = "—";
 
 const SQLITE_UTC_DATE_TIME =
