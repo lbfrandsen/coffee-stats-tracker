@@ -329,7 +329,12 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     <section className="mx-auto grid max-w-6xl gap-4 px-4 py-8 sm:px-6 lg:grid-cols-4 lg:px-8">
       <Card className="border-zinc-800 bg-zinc-950/80 lg:col-span-3">
         <CardHeader className="border-b border-zinc-800">
-          <CardTitle>Leaderboard</CardTitle>
+          <CardTitle>
+            Leaderboard
+            <span className="ml-2 text-zinc-500 normal-case">
+              Hvem har det største koffeinproblem?
+            </span>
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <Table>
@@ -374,7 +379,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
             </TableBody>
           </Table>
           {leaderboardChartData.length > 0 && (
-            <div className="mt-6 pt-6">
+            <div className="mt-4">
               <ChartContainer
                 config={leaderboardChartConfig}
                 className="h-15 w-full aspect-auto"
@@ -545,7 +550,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
               {monthlyChart.totalCups}
             </span>
             <span className="text-xs uppercase text-zinc-400 sm:text-sm">
-              total cups so far
+              total cups this month
             </span>
           </CardAction>
         </CardHeader>
@@ -605,9 +610,9 @@ export default function Home({ loaderData }: Route.ComponentProps) {
       <Card className="border-zinc-800 bg-zinc-950/80 lg:col-span-4">
         <CardHeader className="border-b border-zinc-800">
           <CardTitle className="uppercase">
-            Stats by mugs{" "}
+            Stats by mug{" "}
             <span className="ml-2 text-zinc-500 normal-case">
-              Hvilker kopper er mest populære?
+              Hvilke kopper er mest populære?
             </span>
           </CardTitle>
           <CardAction className="text-sm font-medium uppercase text-zinc-400">
