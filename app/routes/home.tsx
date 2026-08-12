@@ -1,16 +1,17 @@
 import { env } from "cloudflare:workers";
+import { Check, ChevronDown } from "lucide-react";
+import { Link } from "react-router";
 
 import type { Route } from "./+types/home";
 import {
   CardAction,
   Card,
   CardContent,
-  CardDescription,
   CardFooter,
   CardHeader,
   CardTitle,
 } from "~/components/ui/card";
-import { Button } from "~/components/ui/button";
+import { Button, buttonVariants } from "~/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -19,6 +20,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "~/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuLinkItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "~/components/ui/dropdown-menu";
 import {
   Pagination,
   PaginationContent,
@@ -41,6 +50,7 @@ import {
   parseUtcDateTime,
 } from "~/lib/date-time";
 import { getPersonDisplayColor } from "~/lib/person-colors";
+import { cn } from "~/lib/utils";
 import {
   ChartContainer,
   ChartLegend,
@@ -61,6 +71,7 @@ import {
 
 // Persons data table
 type PersonRow = {
+  id: number;
   name: string;
   display_name: string | null;
 };
@@ -98,7 +109,7 @@ type CountRow = {
   total: number;
 };
 
-type MonthlyDrinkRow = {
+type AnalyticsDrinkRow = {
   consumed_at: string;
   person_id: number;
   person_name: string;
@@ -106,20 +117,19 @@ type MonthlyDrinkRow = {
   cup_name: string;
 };
 
-type MonthlyChartDay = {
-  date: string;
-  day: number;
+type AnalyticsChartBucket = {
+  bucket: string;
   [personDataKey: string]: string | number;
 };
 
-type MonthlyChartPerson = {
+type AnalyticsChartPerson = {
   id: number;
   name: string;
   dataKey: string;
   color: string;
 };
 
-type MonthlyChartCup = {
+type AnalyticsChartCup = {
   id: number;
   name: string;
   ownerName: string;
@@ -127,17 +137,28 @@ type MonthlyChartCup = {
   color: string;
 };
 
-type CopenhagenMonth = {
-  year: number;
-  month: number;
-  daysInMonth: number;
+type AnalyticsRange = "today" | "week" | "month" | "all";
+
+type AnalyticsPeriod = {
+  range: AnalyticsRange;
   title: string;
-  queryStart: string;
-  queryEnd: string;
+  subtitle: string;
+  localStartMs: number | null;
+  localEndMs: number | null;
+  queryStart: string | null;
+  queryEnd: string | null;
+  buckets: Array<{ key: string; label: string }>;
 };
 
 const DRINKS_PAGE_SIZE = 15;
 const CHART_NAMES = new Set(["paven", "burger lars"]); // Not everyone should be included in the chart
+const DEFAULT_ANALYTICS_NAMES = new Set(["paven", "burger lars"]);
+const ANALYTICS_RANGES: Array<{ value: AnalyticsRange; label: string }> = [
+  { value: "today", label: "Today" },
+  { value: "week", label: "This week" },
+  { value: "month", label: "This month" },
+  { value: "all", label: "All time" },
+];
 
 const leaderboardChartConfig = {
   cups: {
@@ -146,7 +167,7 @@ const leaderboardChartConfig = {
   },
 } satisfies ChartConfig;
 
-const monthlyCupsChartConfig = {
+const analyticsCupsChartConfig = {
   total: {
     label: "Drinks",
     color: "var(--chart-1)",
@@ -165,7 +186,8 @@ export function meta({}: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
-  const currentMonth = getCurrentCopenhagenMonth();
+  const analyticsRange = parseAnalyticsRange(url.searchParams.get("range"));
+  const analyticsPeriod = getAnalyticsPeriod(analyticsRange);
   const requestedDrinksPage = Number.parseInt(
     url.searchParams.get("drinksPage") ?? "1",
     10,
@@ -176,13 +198,12 @@ export async function loader({ request }: Route.LoaderArgs) {
       : 1;
 
   try {
-    const [peopleResult, cupsResult, drinksCount, monthlyDrinksResult] =
-      await Promise.all([
-        env.DB.prepare(
-          "SELECT name, display_name FROM persons ORDER BY name COLLATE NOCASE ASC",
-        ).all<PersonRow>(),
-        env.DB.prepare(
-          `
+    const [peopleResult, cupsResult, drinksCount] = await Promise.all([
+      env.DB.prepare(
+        "SELECT id, name, display_name FROM persons ORDER BY name COLLATE NOCASE ASC",
+      ).all<PersonRow>(),
+      env.DB.prepare(
+        `
           SELECT
             c.id,
             c.name,
@@ -194,29 +215,38 @@ export async function loader({ request }: Route.LoaderArgs) {
           GROUP BY c.id, c.name, p.name, p.display_name
           ORDER BY total_uses DESC, c.id ASC
         `,
-        ).all<CupRow>(),
-        env.DB.prepare(
-          "SELECT COUNT(*) AS total FROM drinks",
-        ).first<CountRow>(),
-        env.DB.prepare(
-          `
-          SELECT
-            d.consumed_at,
-            p.id AS person_id,
-            COALESCE(p.display_name, p.name) AS person_name,
-            c.id AS cup_id,
-            c.name AS cup_name
-          FROM drinks d
-          JOIN persons p ON p.id = d.person_id
-          JOIN cups c ON c.id = d.cup_id
-          WHERE datetime(d.consumed_at) >= datetime(?)
-            AND datetime(d.consumed_at) < datetime(?)
-          ORDER BY d.consumed_at ASC
-        `,
-        )
-          .bind(currentMonth.queryStart, currentMonth.queryEnd)
-          .all<MonthlyDrinkRow>(),
-      ]);
+      ).all<CupRow>(),
+      env.DB.prepare("SELECT COUNT(*) AS total FROM drinks").first<CountRow>(),
+    ]);
+
+    const people = peopleResult.results;
+    const validPersonIds = new Set(people.map((person) => person.id));
+    const requestedPersonIds = url.searchParams
+      .getAll("person")
+      .map(Number)
+      .filter((id) => Number.isInteger(id) && validPersonIds.has(id));
+    const defaultPersonIds = people
+      .filter((person) =>
+        DEFAULT_ANALYTICS_NAMES.has(
+          (person.display_name ?? person.name).trim().toLowerCase(),
+        ),
+      )
+      .map((person) => person.id);
+    const selectedPersonIds = [
+      ...new Set(
+        requestedPersonIds.length > 0
+          ? requestedPersonIds
+          : defaultPersonIds.length > 0
+            ? defaultPersonIds
+            : people.map((person) => person.id),
+      ),
+    ];
+
+    const analyticsDrinks =
+      selectedPersonIds.length > 0
+        ? (await loadAnalyticsDrinks(selectedPersonIds, analyticsPeriod))
+            .results
+        : [];
 
     const totalDrinks = drinksCount?.total ?? 0;
     const totalPages = Math.max(1, Math.ceil(totalDrinks / DRINKS_PAGE_SIZE));
@@ -263,14 +293,15 @@ export async function loader({ request }: Route.LoaderArgs) {
       .all<DrinkRow>();
 
     return {
-      people: peopleResult.results,
+      people,
       cups: cupsResult.results,
       leaderboardRows: leaderboardResult.results,
       allDrinksRows: drinksResult.results,
-      monthlyChart: buildMonthlyChart(
-        monthlyDrinksResult.results,
-        currentMonth,
-      ),
+      analytics: {
+        range: analyticsRange,
+        selectedPersonIds,
+      },
+      analyticsChart: buildAnalyticsChart(analyticsDrinks, analyticsPeriod),
       drinksPagination: {
         page: currentDrinksPage,
         pageSize: DRINKS_PAGE_SIZE,
@@ -286,7 +317,11 @@ export async function loader({ request }: Route.LoaderArgs) {
       cups: [],
       leaderboardRows: [],
       allDrinksRows: [],
-      monthlyChart: buildMonthlyChart([], currentMonth),
+      analytics: {
+        range: analyticsRange,
+        selectedPersonIds: [],
+      },
+      analyticsChart: buildAnalyticsChart([], analyticsPeriod),
       drinksPagination: {
         page: 1,
         pageSize: DRINKS_PAGE_SIZE,
@@ -303,7 +338,8 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     cups,
     leaderboardRows,
     allDrinksRows,
-    monthlyChart,
+    analytics,
+    analyticsChart,
     drinksPagination,
   } = loaderData;
   const paginationPages = getVisiblePages(
@@ -314,16 +350,30 @@ export default function Home({ loaderData }: Route.ComponentProps) {
   const leaderboardChartData = leaderboardRows.filter((row) =>
     CHART_NAMES.has(row.name.toLowerCase()),
   );
-  const monthlyChartConfig: ChartConfig = Object.fromEntries(
-    monthlyChart.people.map((person) => [
+  const analyticsChartConfig: ChartConfig = Object.fromEntries(
+    analyticsChart.people.map((person) => [
       person.dataKey,
       { label: person.name, color: person.color },
     ]),
   );
-  const monthlyCupsChartHeight = Math.max(
+  const analyticsCupsChartHeight = Math.max(
     120,
-    monthlyChart.cups.length * 44 + 24,
+    analyticsChart.cups.length * 44 + 24,
   );
+  const analyticsTimeChartMinWidth = Math.max(
+    760,
+    analyticsChart.buckets.length * 32,
+  );
+  const selectedPeople = people.filter((person) =>
+    analytics.selectedPersonIds.includes(person.id),
+  );
+  const allPeopleSelected =
+    people.length > 0 && selectedPeople.length === people.length;
+  const peopleFilterLabel = allPeopleSelected
+    ? "All people"
+    : selectedPeople.length === 1
+      ? (selectedPeople[0].display_name ?? selectedPeople[0].name)
+      : `${selectedPeople.length} people`;
 
   return (
     <section className="mx-auto grid max-w-6xl gap-4 px-4 py-8 sm:px-6 lg:grid-cols-4 lg:px-8">
@@ -537,39 +587,133 @@ export default function Home({ loaderData }: Route.ComponentProps) {
         </CardContent>
       </Card>
 
+      <div className="flex flex-col gap-4  py-4 lg:col-span-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="mr-1 text-xs font-medium uppercase text-zinc-500">
+            Period
+          </span>
+          <div className="flex flex-wrap rounded-md border border-zinc-800 bg-zinc-950 p-1">
+            {ANALYTICS_RANGES.map((range) => (
+              <Link
+                key={range.value}
+                to={getAnalyticsHref(
+                  range.value,
+                  analytics.selectedPersonIds,
+                  drinksPagination.page,
+                )}
+                className={buttonVariants({
+                  variant:
+                    analytics.range === range.value ? "secondary" : "ghost",
+                  size: "sm",
+                  className: "shadow-none",
+                })}
+              >
+                {range.label}
+              </Link>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="mr-1 text-xs font-medium uppercase text-zinc-500">
+            People
+          </span>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="cursor-pointer"
+                />
+              }
+              aria-label="Filter analytics by person"
+            >
+              {peopleFilterLabel}
+              <ChevronDown />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuLabel>Select people</DropdownMenuLabel>
+              <DropdownMenuLinkItem
+                href={getAnalyticsHref(
+                  analytics.range,
+                  people.map((person) => person.id),
+                  drinksPagination.page,
+                )}
+                className={cn(
+                  "font-semibold uppercase",
+                  allPeopleSelected && "bg-zinc-800 text-zinc-50",
+                )}
+              >
+                <span className="flex size-4 items-center justify-center cursor-pointer">
+                  {allPeopleSelected && <Check />}
+                </span>
+                All people
+              </DropdownMenuLinkItem>
+              <DropdownMenuSeparator />
+              {people.map((person) => {
+                const isSelected = analytics.selectedPersonIds.includes(
+                  person.id,
+                );
+
+                return (
+                  <DropdownMenuLinkItem
+                    key={person.id}
+                    href={getAnalyticsHref(
+                      analytics.range,
+                      togglePersonFilter(
+                        analytics.selectedPersonIds,
+                        person.id,
+                      ),
+                      drinksPagination.page,
+                    )}
+                  >
+                    <span className="flex size-4 items-center justify-center">
+                      {isSelected && <Check />}
+                    </span>
+                    {person.display_name ?? person.name}
+                  </DropdownMenuLinkItem>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+
       <Card className="border-zinc-800 bg-zinc-950/80 lg:col-span-4">
         <CardHeader className="border-b border-zinc-800">
           <CardTitle className="uppercase">
-            {monthlyChart.title}{" "}
+            {analyticsChart.title}{" "}
             <span className="ml-2 text-zinc-500 normal-case">
-              Hvordan ser misbruget ud denne måned?
+              Hvordan ser misbruget ud?
             </span>
           </CardTitle>
           <CardAction className="flex items-baseline gap-2 whitespace-nowrap font-medium">
             <span className="text-base tabular-nums text-zinc-100">
-              {monthlyChart.totalCups}
+              {analyticsChart.totalCups}
             </span>
             <span className="text-xs uppercase text-zinc-400 sm:text-sm">
-              total cups this month
+              total cups
             </span>
           </CardAction>
         </CardHeader>
         <CardContent>
-          {monthlyChart.people.length > 0 ? (
+          {analyticsChart.people.length > 0 ? (
             <div className="overflow-x-auto pb-2">
               <ChartContainer
-                config={monthlyChartConfig}
-                className="h-96 min-w-190 w-full aspect-auto"
+                config={analyticsChartConfig}
+                className="h-96 w-full aspect-auto"
+                style={{ minWidth: analyticsTimeChartMinWidth }}
                 initialDimension={{ width: 1040, height: 384 }}
               >
                 <BarChart
                   accessibilityLayer
-                  data={monthlyChart.days}
+                  data={analyticsChart.buckets}
                   margin={{ top: 12, right: 12, left: 0, bottom: 0 }}
                 >
                   <CartesianGrid vertical={false} strokeDasharray="3 3" />
                   <XAxis
-                    dataKey="date"
+                    dataKey="bucket"
                     axisLine={false}
                     tickLine={false}
                     tickMargin={10}
@@ -587,7 +731,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                     content={<ChartTooltipContent />}
                   />
                   <ChartLegend content={<ChartLegendContent />} />
-                  {monthlyChart.people.map((person) => (
+                  {analyticsChart.people.map((person) => (
                     <Bar
                       key={person.id}
                       dataKey={person.dataKey}
@@ -601,7 +745,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
             </div>
           ) : (
             <div className="flex h-64 items-center justify-center text-sm text-zinc-400">
-              No drinks recorded this month.
+              No drinks recorded for this selection.
             </div>
           )}
         </CardContent>
@@ -616,23 +760,23 @@ export default function Home({ loaderData }: Route.ComponentProps) {
             </span>
           </CardTitle>
           <CardAction className="text-sm font-medium uppercase text-zinc-400">
-            {monthlyChart.title}
+            {analyticsChart.subtitle}
           </CardAction>
         </CardHeader>
         <CardContent>
-          {monthlyChart.cups.length > 0 ? (
+          {analyticsChart.cups.length > 0 ? (
             <ChartContainer
-              config={monthlyCupsChartConfig}
+              config={analyticsCupsChartConfig}
               className="w-full aspect-auto"
-              style={{ height: monthlyCupsChartHeight }}
+              style={{ height: analyticsCupsChartHeight }}
               initialDimension={{
                 width: 1040,
-                height: monthlyCupsChartHeight,
+                height: analyticsCupsChartHeight,
               }}
             >
               <BarChart
                 accessibilityLayer
-                data={monthlyChart.cups}
+                data={analyticsChart.cups}
                 layout="vertical"
                 margin={{ top: 4, right: 36, left: 0, bottom: 4 }}
               >
@@ -657,7 +801,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                   content={<ChartTooltipContent hideLabel />}
                 />
                 <Bar dataKey="total" barSize={18} radius={[0, 4, 4, 0]}>
-                  {monthlyChart.cups.map((cup) => (
+                  {analyticsChart.cups.map((cup) => (
                     <Cell key={cup.id} fill={cup.color} />
                   ))}
                   <LabelList
@@ -671,7 +815,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
             </ChartContainer>
           ) : (
             <div className="flex h-32 items-center justify-center text-sm text-zinc-400">
-              No cups used this month.
+              No cups used for this selection.
             </div>
           )}
         </CardContent>
@@ -736,7 +880,11 @@ export default function Home({ loaderData }: Route.ComponentProps) {
               <PaginationContent>
                 <PaginationItem>
                   <PaginationPrevious
-                    href={getDrinksPageHref(drinksPagination.page - 1)}
+                    href={getDrinksPageHref(
+                      drinksPagination.page - 1,
+                      analytics.range,
+                      analytics.selectedPersonIds,
+                    )}
                     aria-disabled={drinksPagination.page <= 1}
                     className={
                       drinksPagination.page <= 1
@@ -748,7 +896,11 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                 {paginationPages.map((page) => (
                   <PaginationItem key={page}>
                     <PaginationLink
-                      href={getDrinksPageHref(page)}
+                      href={getDrinksPageHref(
+                        page,
+                        analytics.range,
+                        analytics.selectedPersonIds,
+                      )}
                       isActive={page === drinksPagination.page}
                     >
                       {page}
@@ -757,7 +909,11 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                 ))}
                 <PaginationItem>
                   <PaginationNext
-                    href={getDrinksPageHref(drinksPagination.page + 1)}
+                    href={getDrinksPageHref(
+                      drinksPagination.page + 1,
+                      analytics.range,
+                      analytics.selectedPersonIds,
+                    )}
                     aria-disabled={
                       drinksPagination.page >= drinksPagination.totalPages
                     }
@@ -777,8 +933,42 @@ export default function Home({ loaderData }: Route.ComponentProps) {
   );
 }
 
-function getDrinksPageHref(page: number) {
-  return `/?drinksPage=${Math.max(1, page)}`;
+function getAnalyticsHref(
+  range: AnalyticsRange,
+  personIds: number[],
+  drinksPage = 1,
+) {
+  const searchParams = new URLSearchParams({ range });
+
+  for (const personId of personIds) {
+    searchParams.append("person", String(personId));
+  }
+
+  if (drinksPage > 1) {
+    searchParams.set("drinksPage", String(drinksPage));
+  }
+
+  return `/?${searchParams.toString()}`;
+}
+
+function getDrinksPageHref(
+  page: number,
+  range: AnalyticsRange,
+  personIds: number[],
+) {
+  return getAnalyticsHref(range, personIds, Math.max(1, page));
+}
+
+function togglePersonFilter(selectedPersonIds: number[], personId: number) {
+  if (!selectedPersonIds.includes(personId)) {
+    return [...selectedPersonIds, personId];
+  }
+
+  if (selectedPersonIds.length === 1) {
+    return selectedPersonIds;
+  }
+
+  return selectedPersonIds.filter((selectedId) => selectedId !== personId);
 }
 
 function getRankTextColor(rank: number) {
@@ -804,34 +994,118 @@ const copenhagenDatePartsFormatter = new Intl.DateTimeFormat("en-CA", {
   year: "numeric",
   month: "2-digit",
   day: "2-digit",
+  hour: "2-digit",
+  hourCycle: "h23",
 });
 
 const copenhagenMonthTitleFormatter = new Intl.DateTimeFormat("en-GB", {
-  timeZone: APP_TIME_ZONE,
+  timeZone: "UTC",
   month: "long",
   year: "numeric",
 });
 
-function getCurrentCopenhagenMonth(now = new Date()): CopenhagenMonth {
+const shortDateFormatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "UTC",
+  day: "numeric",
+  month: "short",
+});
+
+const weekdayFormatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "UTC",
+  weekday: "short",
+});
+
+const allTimeBucketFormatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "UTC",
+  month: "short",
+  year: "numeric",
+});
+
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+function parseAnalyticsRange(value: string | null): AnalyticsRange {
+  return value === "today" ||
+    value === "week" ||
+    value === "month" ||
+    value === "all"
+    ? value
+    : "month";
+}
+
+function getAnalyticsPeriod(
+  range: AnalyticsRange,
+  now = new Date(),
+): AnalyticsPeriod {
   const parts = getCopenhagenDateParts(now);
-  const daysInMonth = new Date(
-    Date.UTC(parts.year, parts.month, 0),
-  ).getUTCDate();
-  const oneDayMs = 24 * 60 * 60 * 1000;
+  const todayMs = Date.UTC(parts.year, parts.month - 1, parts.day);
+
+  if (range === "all") {
+    return {
+      range,
+      title: "All time",
+      subtitle: "All recorded data",
+      localStartMs: null,
+      localEndMs: null,
+      queryStart: null,
+      queryEnd: null,
+      buckets: [],
+    };
+  }
+
+  let localStartMs: number;
+  let localEndMs: number;
+  let title: string;
+  let subtitle: string;
+  let buckets: AnalyticsPeriod["buckets"];
+
+  if (range === "today") {
+    localStartMs = todayMs;
+    localEndMs = todayMs + ONE_DAY_MS;
+    title = "Today";
+    subtitle = shortDateFormatter.format(new Date(todayMs));
+    buckets = Array.from({ length: 24 }, (_, hour) => ({
+      key: `hour_${hour}`,
+      label: `${String(hour).padStart(2, "0")}:00`,
+    }));
+  } else if (range === "week") {
+    const mondayOffset = (new Date(todayMs).getUTCDay() + 6) % 7;
+    localStartMs = todayMs - mondayOffset * ONE_DAY_MS;
+    localEndMs = localStartMs + 7 * ONE_DAY_MS;
+    title = "This week";
+    subtitle = `${shortDateFormatter.format(new Date(localStartMs))}–${shortDateFormatter.format(new Date(localEndMs - ONE_DAY_MS))}`;
+    buckets = Array.from({ length: 7 }, (_, index) => {
+      const dateMs = localStartMs + index * ONE_DAY_MS;
+
+      return {
+        key: getLocalDateKey(new Date(dateMs)),
+        label: weekdayFormatter.format(new Date(dateMs)),
+      };
+    });
+  } else {
+    localStartMs = Date.UTC(parts.year, parts.month - 1, 1);
+    localEndMs = Date.UTC(parts.year, parts.month, 1);
+    title = copenhagenMonthTitleFormatter.format(new Date(localStartMs));
+    subtitle = "This month";
+    const daysInMonth = Math.round((localEndMs - localStartMs) / ONE_DAY_MS);
+    buckets = Array.from({ length: daysInMonth }, (_, index) => {
+      const dateMs = localStartMs + index * ONE_DAY_MS;
+
+      return {
+        key: getLocalDateKey(new Date(dateMs)),
+        label: String(index + 1),
+      };
+    });
+  }
 
   return {
-    year: parts.year,
-    month: parts.month,
-    daysInMonth,
-    title: copenhagenMonthTitleFormatter.format(
-      new Date(Date.UTC(parts.year, parts.month - 1, 15, 12)),
-    ),
-    queryStart: new Date(
-      Date.UTC(parts.year, parts.month - 1, 1) - oneDayMs,
-    ).toISOString(),
-    queryEnd: new Date(
-      Date.UTC(parts.year, parts.month, 1) + oneDayMs,
-    ).toISOString(),
+    range,
+    title,
+    subtitle,
+    localStartMs,
+    localEndMs,
+    queryStart: new Date(localStartMs - ONE_DAY_MS).toISOString(),
+    queryEnd: new Date(localEndMs + ONE_DAY_MS).toISOString(),
+    buckets,
   };
 }
 
@@ -844,10 +1118,98 @@ function getCopenhagenDateParts(date: Date) {
     year: value("year"),
     month: value("month"),
     day: value("day"),
+    hour: value("hour"),
   };
 }
 
-function buildMonthlyChart(drinks: MonthlyDrinkRow[], month: CopenhagenMonth) {
+function getLocalDateKey(date: Date) {
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+async function loadAnalyticsDrinks(
+  selectedPersonIds: number[],
+  period: AnalyticsPeriod,
+) {
+  const personPlaceholders = selectedPersonIds.map(() => "?").join(", ");
+  const dateClause =
+    period.queryStart && period.queryEnd
+      ? `
+          AND datetime(d.consumed_at) >= datetime(?)
+          AND datetime(d.consumed_at) < datetime(?)
+        `
+      : "";
+  const bindings: Array<number | string> = [...selectedPersonIds];
+
+  if (period.queryStart && period.queryEnd) {
+    bindings.push(period.queryStart, period.queryEnd);
+  }
+
+  return env.DB.prepare(
+    `
+      SELECT
+        d.consumed_at,
+        p.id AS person_id,
+        COALESCE(p.display_name, p.name) AS person_name,
+        c.id AS cup_id,
+        c.name AS cup_name
+      FROM drinks d
+      JOIN persons p ON p.id = d.person_id
+      JOIN cups c ON c.id = d.cup_id
+      WHERE p.id IN (${personPlaceholders})
+      ${dateClause}
+      ORDER BY d.consumed_at ASC
+    `,
+  )
+    .bind(...bindings)
+    .all<AnalyticsDrinkRow>();
+}
+
+function getAnalyticsBucket(
+  date: ReturnType<typeof getCopenhagenDateParts>,
+  period: AnalyticsPeriod,
+) {
+  const localDateMs = Date.UTC(date.year, date.month - 1, date.day);
+
+  if (
+    period.localStartMs !== null &&
+    period.localEndMs !== null &&
+    (localDateMs < period.localStartMs || localDateMs >= period.localEndMs)
+  ) {
+    return null;
+  }
+
+  if (period.range === "today") {
+    return { key: `hour_${date.hour}`, label: `${date.hour}:00` };
+  }
+
+  if (period.range === "all") {
+    const monthMs = Date.UTC(date.year, date.month - 1, 1);
+
+    return {
+      key: `${date.year}-${String(date.month).padStart(2, "0")}`,
+      label: allTimeBucketFormatter.format(new Date(monthMs)),
+    };
+  }
+
+  const dateMs = new Date(localDateMs);
+
+  return {
+    key: getLocalDateKey(dateMs),
+    label:
+      period.range === "week"
+        ? weekdayFormatter.format(dateMs)
+        : String(date.day),
+  };
+}
+
+function buildAnalyticsChart(
+  drinks: AnalyticsDrinkRow[],
+  period: AnalyticsPeriod,
+) {
   const peopleById = new Map<
     number,
     { id: number; name: string; dataKey: string; total: number }
@@ -862,7 +1224,8 @@ function buildMonthlyChart(drinks: MonthlyDrinkRow[], month: CopenhagenMonth) {
       total: number;
     }
   >();
-  const countsByDay = new Map<number, Map<string, number>>();
+  const countsByBucket = new Map<string, Map<string, number>>();
+  const dynamicBuckets = new Map<string, string>();
   let totalCups = 0;
 
   for (const drink of drinks) {
@@ -870,11 +1233,15 @@ function buildMonthlyChart(drinks: MonthlyDrinkRow[], month: CopenhagenMonth) {
 
     if (!consumedAt) continue;
 
-    const date = getCopenhagenDateParts(consumedAt);
+    const bucket = getAnalyticsBucket(
+      getCopenhagenDateParts(consumedAt),
+      period,
+    );
 
-    if (date.year !== month.year || date.month !== month.month) continue;
+    if (!bucket) continue;
 
     totalCups += 1;
+    dynamicBuckets.set(bucket.key, bucket.label);
 
     const dataKey = `person_${drink.person_id}`;
     const person = peopleById.get(drink.person_id) ?? {
@@ -898,12 +1265,13 @@ function buildMonthlyChart(drinks: MonthlyDrinkRow[], month: CopenhagenMonth) {
     cup.total += 1;
     cupsById.set(drink.cup_id, cup);
 
-    const dayCounts = countsByDay.get(date.day) ?? new Map<string, number>();
-    dayCounts.set(dataKey, (dayCounts.get(dataKey) ?? 0) + 1);
-    countsByDay.set(date.day, dayCounts);
+    const bucketCounts =
+      countsByBucket.get(bucket.key) ?? new Map<string, number>();
+    bucketCounts.set(dataKey, (bucketCounts.get(dataKey) ?? 0) + 1);
+    countsByBucket.set(bucket.key, bucketCounts);
   }
 
-  const people: MonthlyChartPerson[] = [...peopleById.values()]
+  const people: AnalyticsChartPerson[] = [...peopleById.values()]
     .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
     .map((person, index) => ({
       id: person.id,
@@ -915,7 +1283,7 @@ function buildMonthlyChart(drinks: MonthlyDrinkRow[], month: CopenhagenMonth) {
   const personColorById = new Map(
     people.map((person) => [person.id, person.color]),
   );
-  const cups: MonthlyChartCup[] = [...cupsById.values()]
+  const cups: AnalyticsChartCup[] = [...cupsById.values()]
     .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
     .map((cup) => ({
       id: cup.id,
@@ -927,26 +1295,29 @@ function buildMonthlyChart(drinks: MonthlyDrinkRow[], month: CopenhagenMonth) {
         getPersonDisplayColor(cup.ownerName, cup.ownerId),
     }));
 
-  const days: MonthlyChartDay[] = Array.from(
-    { length: month.daysInMonth },
-    (_, index) => {
-      const day = index + 1;
-      const chartDay: MonthlyChartDay = { date: String(day), day };
-      const dayCounts = countsByDay.get(day);
+  const periodBuckets =
+    period.range === "all"
+      ? [...dynamicBuckets.entries()]
+          .sort(([keyA], [keyB]) => keyA.localeCompare(keyB))
+          .map(([key, label]) => ({ key, label }))
+      : period.buckets;
+  const buckets: AnalyticsChartBucket[] = periodBuckets.map((bucket) => {
+    const chartBucket: AnalyticsChartBucket = { bucket: bucket.label };
+    const bucketCounts = countsByBucket.get(bucket.key);
 
-      for (const person of people) {
-        chartDay[person.dataKey] = dayCounts?.get(person.dataKey) ?? 0;
-      }
+    for (const person of people) {
+      chartBucket[person.dataKey] = bucketCounts?.get(person.dataKey) ?? 0;
+    }
 
-      return chartDay;
-    },
-  );
+    return chartBucket;
+  });
 
   return {
-    title: month.title,
+    title: period.title,
+    subtitle: period.subtitle,
     totalCups,
     people,
     cups,
-    days,
+    buckets,
   };
 }
