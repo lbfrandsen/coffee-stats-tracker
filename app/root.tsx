@@ -75,6 +75,14 @@ export default function App() {
               </NavigationMenuItem>
               <NavigationMenuItem>
                 <NavigationMenuLink
+                  href="/mugs"
+                  className="px-3 font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50 focus:bg-zinc-800 focus:text-zinc-50"
+                >
+                  Kopper
+                </NavigationMenuLink>
+              </NavigationMenuItem>
+              <NavigationMenuItem>
+                <NavigationMenuLink
                   href="/info"
                   className="px-3 font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50 focus:bg-zinc-800 focus:text-zinc-50"
                 >
@@ -86,7 +94,7 @@ export default function App() {
                   href="/status"
                   className="px-3 font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50 focus:bg-zinc-800 focus:text-zinc-50"
                 >
-                  Raspberry Pi Status
+                  System Status
                 </NavigationMenuLink>
               </NavigationMenuItem>
             </NavigationMenuList>

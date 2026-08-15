@@ -680,7 +680,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
         </div>
       </div>
 
-      <Card className="border-zinc-800 bg-zinc-950/80 lg:col-span-4">
+      <Card className="ring-0 border-zinc-800 bg-zinc-950/80 lg:col-span-4">
         <CardHeader className="border-b border-zinc-800">
           <CardTitle className="uppercase">
             {analyticsChart.title}{" "}
@@ -751,7 +751,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
         </CardContent>
       </Card>
 
-      <Card className="border-zinc-800 bg-zinc-950/80 lg:col-span-4">
+      <Card className="ring-0 border-zinc-800 bg-zinc-950/80 lg:col-span-4">
         <CardHeader className="border-b border-zinc-800">
           <CardTitle className="uppercase">
             Stats by mug{" "}
