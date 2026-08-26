@@ -724,6 +724,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                     tickLine={false}
                     tickMargin={8}
                     allowDecimals={false}
+                    domain={[0, "dataMax"]}
                     width={28}
                   />
                   <ChartTooltip
