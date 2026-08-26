@@ -68,7 +68,7 @@ export default function Mugs({ loaderData }: Route.ComponentProps) {
           alt="royal-cph-kop"
           title="Royal Copenhagen Koppen"
           totalUses={getTotalUses("Royal Copenhagen Kop")}
-          description="Paven har fået (eller, lånt på meget ubestemt tid) to Royal Copenhagen kopper af sin mor, og det er han naturligvis utroligt taknemmelig for - primært fordi der er intet scnearie, hvor han selv ville have haft råd til at købe Royal Copenhagen på SU.
+          description="Paven har fået (eller, lånt på meget ubestemt tid) to Royal Copenhagen kopper af sin mor, og det er han naturligvis utroligt taknemmelig for - primært fordi der er intet scenarie, hvor han selv ville have haft råd til at købe Royal Copenhagen på SU.
           Når det kommer til det håndmalede Royal Copenhagen, så kan prisen, til en vis grad, retfærdiggøres af arbejdet der ligger heri - men når det gælder helt blanke, hvide kopper, så er prisen totalt til grin, og det er komplet uforståeligt, at den holdning ikke er mere udbredt blandt danskerne. Det burde ikke være muligt at slippe afsted med.
           Med det sure opstød overstået, så er det dog en rigtig fin kop - man brænder sig ikke når man drikker af den, den har overlevet et par klassiske fald fra skabet til vasken - men mest af alt er den til for affektionsværdi: Det er trods alt mor, der har introduceret koppen, og man lytter ALTID til mor."
           imageClassName="object-contain [transform:rotateY(180deg)]"
