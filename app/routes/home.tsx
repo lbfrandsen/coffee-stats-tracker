@@ -200,7 +200,16 @@ export async function loader({ request }: Route.LoaderArgs) {
   try {
     const [peopleResult, cupsResult, drinksCount] = await Promise.all([
       env.DB.prepare(
-        "SELECT id, name, display_name FROM persons ORDER BY name COLLATE NOCASE ASC",
+        `
+          SELECT p.id, p.name, p.display_name
+          FROM persons p
+          WHERE EXISTS (
+            SELECT 1
+            FROM cups c
+            WHERE c.owner_id = p.id
+          )
+          ORDER BY p.name COLLATE NOCASE ASC
+        `,
       ).all<PersonRow>(),
       env.DB.prepare(
         `
