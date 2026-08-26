@@ -377,7 +377,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
 
   return (
     <section className="mx-auto grid max-w-6xl gap-4 px-4 py-8 sm:px-6 lg:grid-cols-4 lg:px-8">
-      <Card className="border-zinc-800 bg-zinc-950/80 lg:col-span-3">
+      <Card className="ring-0 border-zinc-800 bg-zinc-950/80 lg:col-span-3">
         <CardHeader className="border-b border-zinc-800">
           <CardTitle>
             Leaderboard
