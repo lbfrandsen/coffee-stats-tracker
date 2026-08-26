@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
-import { Check, ChevronDown } from "lucide-react";
+import { Tooltip } from "@base-ui/react/tooltip";
+import { Check, ChevronDown, Info } from "lucide-react";
 import { Link } from "react-router";
 
 import type { Route } from "./+types/home";
@@ -47,6 +48,7 @@ import {
 import {
   APP_TIME_ZONE,
   formatDateTime,
+  formatTime,
   parseUtcDateTime,
 } from "~/lib/date-time";
 import { getPersonDisplayColor } from "~/lib/person-colors";
@@ -110,6 +112,7 @@ type CountRow = {
 };
 
 type AnalyticsDrinkRow = {
+  id: number;
   consumed_at: string;
   person_id: number;
   person_name: string;
@@ -135,6 +138,31 @@ type AnalyticsChartCup = {
   ownerName: string;
   total: number;
   color: string;
+};
+
+type FastestDoublekill = {
+  personId: number;
+  personName: string;
+  intervalMs: number | null;
+  firstConsumedAt: string | null;
+  secondConsumedAt: string | null;
+};
+
+type TypicalCooldown = {
+  personId: number;
+  personName: string;
+  intervalMs: number | null;
+};
+
+type EarlyBird = {
+  personId: number;
+  personName: string;
+  consumedAt: string | null;
+};
+
+type EligibleAnalyticsDrink = {
+  drink: AnalyticsDrinkRow;
+  consumedAt: Date;
 };
 
 type AnalyticsRange = "today" | "week" | "month" | "all";
@@ -256,6 +284,13 @@ export async function loader({ request }: Route.LoaderArgs) {
         ? (await loadAnalyticsDrinks(selectedPersonIds, analyticsPeriod))
             .results
         : [];
+    const selectedPeople = people.filter((person) =>
+      selectedPersonIds.includes(person.id),
+    );
+    const eligibleAnalyticsDrinks = getEligibleAnalyticsDrinks(
+      analyticsDrinks,
+      analyticsPeriod,
+    );
 
     const totalDrinks = drinksCount?.total ?? 0;
     const totalPages = Math.max(1, Math.ceil(totalDrinks / DRINKS_PAGE_SIZE));
@@ -311,6 +346,15 @@ export async function loader({ request }: Route.LoaderArgs) {
         selectedPersonIds,
       },
       analyticsChart: buildAnalyticsChart(analyticsDrinks, analyticsPeriod),
+      fastestDoublekills: buildFastestDoublekills(
+        eligibleAnalyticsDrinks,
+        selectedPeople,
+      ),
+      typicalCooldowns: buildTypicalCooldowns(
+        eligibleAnalyticsDrinks,
+        selectedPeople,
+      ),
+      earlyBirds: buildEarlyBirds(eligibleAnalyticsDrinks, selectedPeople),
       drinksPagination: {
         page: currentDrinksPage,
         pageSize: DRINKS_PAGE_SIZE,
@@ -331,6 +375,9 @@ export async function loader({ request }: Route.LoaderArgs) {
         selectedPersonIds: [],
       },
       analyticsChart: buildAnalyticsChart([], analyticsPeriod),
+      fastestDoublekills: [],
+      typicalCooldowns: [],
+      earlyBirds: [],
       drinksPagination: {
         page: 1,
         pageSize: DRINKS_PAGE_SIZE,
@@ -349,6 +396,9 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     allDrinksRows,
     analytics,
     analyticsChart,
+    fastestDoublekills,
+    typicalCooldowns,
+    earlyBirds,
     drinksPagination,
   } = loaderData;
   const paginationPages = getVisiblePages(
@@ -761,6 +811,183 @@ export default function Home({ loaderData }: Route.ComponentProps) {
         </CardContent>
       </Card>
 
+      <section
+        className="grid gap-4 lg:col-span-4 lg:grid-cols-3"
+        aria-label="Minor statistics"
+      >
+        <Card className="border-zinc-800 bg-zinc-950/80">
+          <CardHeader className="border-b border-zinc-800">
+            <CardTitle className="uppercase">
+              Hurtigste doublekill
+              <Tooltip.Root>
+                <Tooltip.Trigger
+                  type="button"
+                  delay={150}
+                  aria-label="What does median cooldown mean?"
+                  className="inline-flex size-5 cursor-pointer items-center justify-center rounded-full text-zinc-500 transition-colors hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+                >
+                  <Info className="size-3.5" aria-hidden="true" />
+                </Tooltip.Trigger>
+                <Tooltip.Portal>
+                  <Tooltip.Positioner sideOffset={8}>
+                    <Tooltip.Popup className="z-50 max-w-64 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs leading-5 font-normal tracking-normal text-zinc-200 normal-case shadow-lg transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0">
+                      Hurtigste doublekill er ikke så drabligt som det lyder.
+                      Det er intervallet mellem de to kopper, som er drukket
+                      hurtigst efter hinanden.
+                    </Tooltip.Popup>
+                  </Tooltip.Positioner>
+                </Tooltip.Portal>
+              </Tooltip.Root>
+            </CardTitle>
+            <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
+              {analyticsChart.subtitle}
+            </CardAction>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {fastestDoublekills.map((doublekill) => (
+              <div key={doublekill.personId}>
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="font-medium">{doublekill.personName}</span>
+                  <span
+                    className="shrink-0 font-medium tabular-nums text-zinc-300"
+                    style={
+                      doublekill.intervalMs === null
+                        ? undefined
+                        : {
+                            color: getPersonDisplayColor(
+                              doublekill.personName,
+                              doublekill.personId,
+                            ),
+                          }
+                    }
+                  >
+                    {doublekill.intervalMs === null
+                      ? "—"
+                      : formatInterval(doublekill.intervalMs)}
+                  </span>
+                </div>
+                {doublekill.firstConsumedAt && doublekill.secondConsumedAt ? (
+                  <div className="mt-1 text-xs text-zinc-500">
+                    <p>{formatAnalyticsDate(doublekill.firstConsumedAt)}</p>
+                    <p className="mt-0.5 tabular-nums">
+                      {formatTime(doublekill.firstConsumedAt)} →{" "}
+                      {formatTime(doublekill.secondConsumedAt)}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Not enough drinks in this period.
+                  </p>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card className="border-zinc-800 bg-zinc-950/80">
+          <CardHeader className="border-b border-zinc-800">
+            <CardTitle className="flex items-center gap-1.5 uppercase">
+              Median cooldown
+              <Tooltip.Root>
+                <Tooltip.Trigger
+                  type="button"
+                  delay={150}
+                  aria-label="What does median cooldown mean?"
+                  className="inline-flex size-5 cursor-pointer items-center justify-center rounded-full text-zinc-500 transition-colors hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+                >
+                  <Info className="size-3.5" aria-hidden="true" />
+                </Tooltip.Trigger>
+                <Tooltip.Portal>
+                  <Tooltip.Positioner sideOffset={8}>
+                    <Tooltip.Popup className="z-50 max-w-64 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs leading-5 font-normal tracking-normal text-zinc-200 normal-case shadow-lg transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0">
+                      Medianen er den midterste observation i et datasæt, så det
+                      er det midterste tidsinterval af alle på samme dag, efter
+                      intervallerne er sorteret. Den repræsenterer dermed den
+                      typiske pause mellem to kopper kaffe. F.eks. med sorterede
+                      intervaller på 15min, 18min og 37min, er 18min medianen.
+                    </Tooltip.Popup>
+                  </Tooltip.Positioner>
+                </Tooltip.Portal>
+              </Tooltip.Root>
+            </CardTitle>
+            <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
+              {analyticsChart.subtitle}
+            </CardAction>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {typicalCooldowns.map((cooldown) => (
+              <div key={cooldown.personId}>
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="font-medium">{cooldown.personName}</span>
+                  <span
+                    className="shrink-0 font-medium tabular-nums text-zinc-300"
+                    style={
+                      cooldown.intervalMs === null
+                        ? undefined
+                        : {
+                            color: getPersonDisplayColor(
+                              cooldown.personName,
+                              cooldown.personId,
+                            ),
+                          }
+                    }
+                  >
+                    {cooldown.intervalMs === null
+                      ? "—"
+                      : formatInterval(cooldown.intervalMs)}
+                  </span>
+                </div>
+                {cooldown.intervalMs === null && (
+                  <p className="mt-1 text-xs text-zinc-500">
+                    No same-day interval in this period.
+                  </p>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card className="border-zinc-800 bg-zinc-950/80">
+          <CardHeader className="border-b border-zinc-800">
+            <CardTitle className="uppercase">Earliest drink</CardTitle>
+            <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
+              {analyticsChart.subtitle}
+            </CardAction>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {earlyBirds.map((earlyBird) => (
+              <div key={earlyBird.personId}>
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="font-medium">{earlyBird.personName}</span>
+                  <span
+                    className="shrink-0 font-medium tabular-nums text-zinc-300"
+                    style={
+                      earlyBird.consumedAt
+                        ? {
+                            color: getPersonDisplayColor(
+                              earlyBird.personName,
+                              earlyBird.personId,
+                            ),
+                          }
+                        : undefined
+                    }
+                  >
+                    {earlyBird.consumedAt
+                      ? formatTime(earlyBird.consumedAt)
+                      : "—"}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {earlyBird.consumedAt
+                    ? formatAnalyticsDate(earlyBird.consumedAt)
+                    : "No drinks in this period."}
+                </p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </section>
+
       <Card className="ring-0 border-zinc-800 bg-zinc-950/80 lg:col-span-4">
         <CardHeader className="border-b border-zinc-800">
           <CardTitle className="uppercase">
@@ -1005,6 +1232,8 @@ const copenhagenDatePartsFormatter = new Intl.DateTimeFormat("en-CA", {
   month: "2-digit",
   day: "2-digit",
   hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
   hourCycle: "h23",
 });
 
@@ -1012,6 +1241,11 @@ const copenhagenMonthTitleFormatter = new Intl.DateTimeFormat("en-GB", {
   timeZone: "UTC",
   month: "long",
   year: "numeric",
+});
+
+const analyticsDateFormatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: APP_TIME_ZONE,
+  dateStyle: "medium",
 });
 
 const shortDateFormatter = new Intl.DateTimeFormat("en-GB", {
@@ -1129,6 +1363,8 @@ function getCopenhagenDateParts(date: Date) {
     month: value("month"),
     day: value("day"),
     hour: value("hour"),
+    minute: value("minute"),
+    second: value("second"),
   };
 }
 
@@ -1161,6 +1397,7 @@ async function loadAnalyticsDrinks(
   return env.DB.prepare(
     `
       SELECT
+        d.id,
         d.consumed_at,
         p.id AS person_id,
         COALESCE(p.display_name, p.name) AS person_name,
@@ -1171,7 +1408,7 @@ async function loadAnalyticsDrinks(
       JOIN cups c ON c.id = d.cup_id
       WHERE p.id IN (${personPlaceholders})
       ${dateClause}
-      ORDER BY d.consumed_at ASC
+      ORDER BY d.consumed_at ASC, d.id ASC
     `,
   )
     .bind(...bindings)
@@ -1214,6 +1451,187 @@ function getAnalyticsBucket(
         ? weekdayFormatter.format(dateMs)
         : String(date.day),
   };
+}
+
+function getEligibleAnalyticsDrinks(
+  drinks: AnalyticsDrinkRow[],
+  period: AnalyticsPeriod,
+): EligibleAnalyticsDrink[] {
+  return drinks
+    .map((drink) => ({
+      drink,
+      consumedAt: parseUtcDateTime(drink.consumed_at),
+    }))
+    .filter(
+      (item): item is { drink: AnalyticsDrinkRow; consumedAt: Date } =>
+        item.consumedAt !== null &&
+        getAnalyticsBucket(getCopenhagenDateParts(item.consumedAt), period) !==
+          null,
+    )
+    .sort(
+      (a, b) =>
+        a.consumedAt.getTime() - b.consumedAt.getTime() ||
+        a.drink.id - b.drink.id,
+    );
+}
+
+function buildFastestDoublekills(
+  eligibleDrinks: EligibleAnalyticsDrink[],
+  people: PersonRow[],
+): FastestDoublekill[] {
+  const previousByPerson = new Map<
+    number,
+    { consumedAt: string; timestampMs: number }
+  >();
+  const fastestByPerson = new Map<
+    number,
+    {
+      intervalMs: number;
+      firstConsumedAt: string;
+      secondConsumedAt: string;
+    }
+  >();
+
+  for (const { drink, consumedAt } of eligibleDrinks) {
+    const timestampMs = consumedAt.getTime();
+    const previous = previousByPerson.get(drink.person_id);
+
+    if (previous) {
+      const intervalMs = timestampMs - previous.timestampMs;
+      const fastest = fastestByPerson.get(drink.person_id);
+
+      if (intervalMs >= 0 && (!fastest || intervalMs < fastest.intervalMs)) {
+        fastestByPerson.set(drink.person_id, {
+          intervalMs,
+          firstConsumedAt: previous.consumedAt,
+          secondConsumedAt: drink.consumed_at,
+        });
+      }
+    }
+
+    previousByPerson.set(drink.person_id, {
+      consumedAt: drink.consumed_at,
+      timestampMs,
+    });
+  }
+
+  return [...people]
+    .sort((a, b) => a.id - b.id)
+    .map((person) => {
+      const fastest = fastestByPerson.get(person.id);
+
+      return {
+        personId: person.id,
+        personName: person.display_name ?? person.name,
+        intervalMs: fastest?.intervalMs ?? null,
+        firstConsumedAt: fastest?.firstConsumedAt ?? null,
+        secondConsumedAt: fastest?.secondConsumedAt ?? null,
+      };
+    });
+}
+
+function buildTypicalCooldowns(
+  eligibleDrinks: EligibleAnalyticsDrink[],
+  people: PersonRow[],
+): TypicalCooldown[] {
+  const previousByPersonAndDay = new Map<string, number>();
+  const intervalsByPerson = new Map<number, number[]>();
+
+  for (const { drink, consumedAt } of eligibleDrinks) {
+    const date = getCopenhagenDateParts(consumedAt);
+    const dayKey = `${drink.person_id}:${date.year}-${date.month}-${date.day}`;
+    const timestampMs = consumedAt.getTime();
+    const previousTimestampMs = previousByPersonAndDay.get(dayKey);
+
+    if (previousTimestampMs !== undefined) {
+      const intervalMs = timestampMs - previousTimestampMs;
+
+      if (intervalMs >= 0) {
+        const intervals = intervalsByPerson.get(drink.person_id) ?? [];
+        intervals.push(intervalMs);
+        intervalsByPerson.set(drink.person_id, intervals);
+      }
+    }
+
+    previousByPersonAndDay.set(dayKey, timestampMs);
+  }
+
+  return [...people]
+    .sort((a, b) => a.id - b.id)
+    .map((person) => {
+      const intervals = intervalsByPerson.get(person.id)?.sort((a, b) => a - b);
+      let intervalMs: number | null = null;
+
+      if (intervals && intervals.length > 0) {
+        const middle = Math.floor(intervals.length / 2);
+        intervalMs =
+          intervals.length % 2 === 1
+            ? intervals[middle]
+            : (intervals[middle - 1] + intervals[middle]) / 2;
+      }
+
+      return {
+        personId: person.id,
+        personName: person.display_name ?? person.name,
+        intervalMs,
+      };
+    });
+}
+
+function buildEarlyBirds(
+  eligibleDrinks: EligibleAnalyticsDrink[],
+  people: PersonRow[],
+): EarlyBird[] {
+  const earliestByPerson = new Map<
+    number,
+    { consumedAt: string; localTimeMs: number }
+  >();
+
+  for (const { drink, consumedAt } of eligibleDrinks) {
+    const date = getCopenhagenDateParts(consumedAt);
+    const localTimeMs =
+      ((date.hour * 60 + date.minute) * 60 + date.second) * 1000 +
+      consumedAt.getUTCMilliseconds();
+    const earliest = earliestByPerson.get(drink.person_id);
+
+    if (!earliest || localTimeMs < earliest.localTimeMs) {
+      earliestByPerson.set(drink.person_id, {
+        consumedAt: drink.consumed_at,
+        localTimeMs,
+      });
+    }
+  }
+
+  return [...people]
+    .sort((a, b) => a.id - b.id)
+    .map((person) => ({
+      personId: person.id,
+      personName: person.display_name ?? person.name,
+      consumedAt: earliestByPerson.get(person.id)?.consumedAt ?? null,
+    }));
+}
+
+function formatInterval(intervalMs: number) {
+  const totalSeconds = Math.floor(intervalMs / 1000);
+  const days = Math.floor(totalSeconds / 86_400);
+  const hours = Math.floor((totalSeconds % 86_400) / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+
+  return [
+    days > 0 ? `${days}d` : null,
+    hours > 0 ? `${hours}h` : null,
+    minutes > 0 ? `${minutes}m` : null,
+    `${seconds}s`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function formatAnalyticsDate(value: string) {
+  const date = parseUtcDateTime(value);
+
+  return date ? analyticsDateFormatter.format(date) : "—";
 }
 
 function buildAnalyticsChart(
