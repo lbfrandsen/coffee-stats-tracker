@@ -47,7 +47,7 @@ export default function Mugs({ loaderData }: Route.ComponentProps) {
           alt="fck-kop"
           title="F.C. København Koppen"
           totalUses={getTotalUses("FCK Kop")}
-          description="Det er uvidst, hvor længe Paven har ejet FCK koppen, men det er tæt på at være lige så mange år, som han har tilbragt på denne Jord.
+          description="Det er uvist, hvor længe Paven har ejet FCK koppen, men det er tæt på at være lige så mange år, som han har tilbragt på denne Jord.
           Et kvalificeret gæt er, at koppen er fra 2007-8 stykker, og dermed selvsagt har stor affektionsværdi for manden, som pt. har det største koffeinproblem i lejligheden.
           I dens spæde tid blev koppen mest brugt til sodavand og kakao, især når onkel Stig var på besøg, eftersom manden er Brøndby fan. I disse dage bruges den udelukkende til misbruget, og udgør en uproprtionel stor andel af det totale antal serveringer sammenlignet med antal kopper til rådighed.
           Naturligvis står den også tilbage som minde om en tid, hvor FCK lignede et hold, som på et tidspunkt havde set en fodbold før i deres liv. Det var tider."

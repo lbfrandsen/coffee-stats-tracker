@@ -949,7 +949,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
 
         <Card className="border-zinc-800 bg-zinc-950/80">
           <CardHeader className="border-b border-zinc-800">
-            <CardTitle className="uppercase">Earliest drink</CardTitle>
+            <CardTitle className="uppercase">Tidligste drink</CardTitle>
             <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
               {analyticsChart.subtitle}
             </CardAction>
