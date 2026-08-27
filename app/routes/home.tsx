@@ -154,6 +154,23 @@ type TypicalCooldown = {
   intervalMs: number | null;
 };
 
+type RapidFire = {
+  personId: number;
+  personName: string;
+  averageIntervalMs: number | null;
+  dateConsumedAt: string | null;
+  cupCount: number;
+};
+
+type Loyalist = {
+  personId: number;
+  personName: string;
+  percentage: number | null;
+  cupCount: number;
+  totalCupCount: number;
+  cupName: string | null;
+};
+
 type EarlyBird = {
   personId: number;
   personName: string;
@@ -360,6 +377,8 @@ export async function loader({ request }: Route.LoaderArgs) {
         eligibleAnalyticsDrinks,
         selectedPeople,
       ),
+      rapidFires: buildRapidFires(eligibleAnalyticsDrinks, selectedPeople),
+      loyalists: buildLoyalists(eligibleAnalyticsDrinks, selectedPeople),
       earlyBirds: buildEarlyBirds(eligibleAnalyticsDrinks, selectedPeople),
       nightOwls: buildNightOwls(eligibleAnalyticsDrinks, selectedPeople),
       drinksPagination: {
@@ -384,6 +403,8 @@ export async function loader({ request }: Route.LoaderArgs) {
       analyticsChart: buildAnalyticsChart([], analyticsPeriod),
       fastestDoublekills: [],
       typicalCooldowns: [],
+      rapidFires: [],
+      loyalists: [],
       earlyBirds: [],
       nightOwls: [],
       drinksPagination: {
@@ -406,6 +427,8 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     analyticsChart,
     fastestDoublekills,
     typicalCooldowns,
+    rapidFires,
+    loyalists,
     earlyBirds,
     nightOwls,
     drinksPagination,
@@ -826,13 +849,13 @@ export default function Home({ loaderData }: Route.ComponentProps) {
       >
         <Card className="border-zinc-800 bg-zinc-950/80">
           <CardHeader className="border-b border-zinc-800">
-            <CardTitle className="uppercase">
+            <CardTitle className="flex items-center gap-1.5 uppercase">
               Hurtigste doublekill
               <Tooltip.Root>
                 <Tooltip.Trigger
                   type="button"
                   delay={150}
-                  aria-label="What does median cooldown mean?"
+                  aria-label="What does fastest doublekill mean?"
                   className="inline-flex size-5 cursor-pointer items-center justify-center rounded-full text-zinc-500 transition-colors hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
                 >
                   <Info className="size-3.5" aria-hidden="true" />
@@ -877,8 +900,9 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                 </div>
                 {doublekill.firstConsumedAt && doublekill.secondConsumedAt ? (
                   <div className="mt-1 text-xs text-zinc-500">
-                    <p>{formatAnalyticsDate(doublekill.firstConsumedAt)}</p>
-                    <p className="mt-0.5 tabular-nums">
+                    <p>
+                      {formatAnalyticsDate(doublekill.firstConsumedAt)}
+                      {" · "}
                       {formatTime(doublekill.firstConsumedAt)} →{" "}
                       {formatTime(doublekill.secondConsumedAt)}
                     </p>
@@ -998,22 +1022,122 @@ export default function Home({ loaderData }: Route.ComponentProps) {
 
         <Card className="border-zinc-800 bg-zinc-950/80">
           <CardHeader className="border-b border-zinc-800">
-            <CardTitle className="uppercase">Placeholder</CardTitle>
+            <CardTitle className="flex items-center gap-1.5 uppercase">
+              Rapid fire
+              <Tooltip.Root>
+                <Tooltip.Trigger
+                  type="button"
+                  delay={150}
+                  aria-label="Hvad betyder Rapid fire?"
+                  className="inline-flex size-5 cursor-pointer items-center justify-center rounded-full text-zinc-500 transition-colors hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+                >
+                  <Info className="size-3.5" aria-hidden="true" />
+                </Tooltip.Trigger>
+                <Tooltip.Portal>
+                  <Tooltip.Positioner sideOffset={8}>
+                    <Tooltip.Popup className="z-50 max-w-64 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs leading-5 font-normal tracking-normal text-zinc-200 normal-case shadow-lg transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0">
+                      Rapid fire viser personens laveste gennemsnitlige tid
+                      mellem sammenhængende kopper på én kalenderdag inden for
+                      det valgte filter. Hver dag beregnes separat, og dage med
+                      færre end to kopper tæller ikke med.
+                    </Tooltip.Popup>
+                  </Tooltip.Positioner>
+                </Tooltip.Portal>
+              </Tooltip.Root>
+            </CardTitle>
             <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
               {analyticsChart.subtitle}
             </CardAction>
           </CardHeader>
-          <CardContent className="space-y-5"></CardContent>
+          <CardContent className="space-y-5">
+            {rapidFires.map((rapidFire) => (
+              <div key={rapidFire.personId}>
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="font-medium">{rapidFire.personName}</span>
+                  <span
+                    className="shrink-0 font-medium tabular-nums text-zinc-300"
+                    style={
+                      rapidFire.averageIntervalMs === null
+                        ? undefined
+                        : {
+                            color: getPersonDisplayColor(
+                              rapidFire.personName,
+                              rapidFire.personId,
+                            ),
+                          }
+                    }
+                  >
+                    {rapidFire.averageIntervalMs === null
+                      ? "—"
+                      : formatInterval(rapidFire.averageIntervalMs)}
+                  </span>
+                </div>
+                {rapidFire.dateConsumedAt ? (
+                  <p className="mt-1 text-xs text-zinc-500">
+                    {formatAnalyticsDate(rapidFire.dateConsumedAt)} ·{" "}
+                    {rapidFire.cupCount} kopper
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Not enough drinks in this period.
+                  </p>
+                )}
+              </div>
+            ))}
+          </CardContent>
         </Card>
 
         <Card className="border-zinc-800 bg-zinc-950/80">
           <CardHeader className="border-b border-zinc-800">
-            <CardTitle className="uppercase">Placeholder</CardTitle>
+            <CardTitle className="uppercase">Loyalisten</CardTitle>
             <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
               {analyticsChart.subtitle}
             </CardAction>
           </CardHeader>
-          <CardContent className="space-y-5"></CardContent>
+          <CardContent className="space-y-5">
+            {loyalists.map((loyalist) => (
+              <div key={loyalist.personId}>
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="font-medium">{loyalist.personName}</span>
+
+                  <span
+                    className="shrink-0 font-medium tabular-nums text-zinc-300"
+                    style={
+                      loyalist.percentage === null
+                        ? undefined
+                        : {
+                            color: getPersonDisplayColor(
+                              loyalist.personName,
+                              loyalist.personId,
+                            ),
+                          }
+                    }
+                  >
+                    {loyalist.percentage === null
+                      ? "—"
+                      : formatPercentage(loyalist.percentage)}
+                  </span>
+                </div>
+
+                <p className="mt-1">
+                  {loyalist.cupName ? (
+                    <>
+                      <span className="font-medium text-zinc-300">
+                        {loyalist.cupName}
+                      </span>
+                      <span className="ml-2 text-xs text-zinc-500">
+                        {loyalist.cupCount} af {loyalist.totalCupCount} kopper
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-xs text-zinc-500">
+                      No drinks in this period.
+                    </span>
+                  )}
+                </p>
+              </div>
+            ))}
+          </CardContent>
         </Card>
 
         <Card className="border-zinc-800 bg-zinc-950/80">
@@ -1647,6 +1771,151 @@ function buildTypicalCooldowns(
     });
 }
 
+function buildRapidFires(
+  eligibleDrinks: EligibleAnalyticsDrink[],
+  people: PersonRow[],
+): RapidFire[] {
+  const days = new Map<
+    string,
+    {
+      personId: number;
+      dateConsumedAt: string;
+      previousTimestampMs: number;
+      totalIntervalMs: number;
+      intervalCount: number;
+      cupCount: number;
+    }
+  >();
+
+  for (const { drink, consumedAt } of eligibleDrinks) {
+    const date = getCopenhagenDateParts(consumedAt);
+    const dayKey = `${drink.person_id}:${date.year}-${date.month}-${date.day}`;
+    const timestampMs = consumedAt.getTime();
+    const day = days.get(dayKey);
+
+    if (!day) {
+      days.set(dayKey, {
+        personId: drink.person_id,
+        dateConsumedAt: drink.consumed_at,
+        previousTimestampMs: timestampMs,
+        totalIntervalMs: 0,
+        intervalCount: 0,
+        cupCount: 1,
+      });
+      continue;
+    }
+
+    const intervalMs = timestampMs - day.previousTimestampMs;
+
+    if (intervalMs >= 0) {
+      day.totalIntervalMs += intervalMs;
+      day.intervalCount += 1;
+    }
+
+    day.previousTimestampMs = timestampMs;
+    day.cupCount += 1;
+  }
+
+  const fastestByPerson = new Map<
+    number,
+    {
+      averageIntervalMs: number;
+      dateConsumedAt: string;
+      cupCount: number;
+    }
+  >();
+
+  for (const day of days.values()) {
+    if (day.intervalCount === 0) continue;
+
+    const averageIntervalMs = day.totalIntervalMs / day.intervalCount;
+    const fastest = fastestByPerson.get(day.personId);
+
+    if (!fastest || averageIntervalMs < fastest.averageIntervalMs) {
+      fastestByPerson.set(day.personId, {
+        averageIntervalMs,
+        dateConsumedAt: day.dateConsumedAt,
+        cupCount: day.cupCount,
+      });
+    }
+  }
+
+  return [...people]
+    .sort((a, b) => a.id - b.id)
+    .map((person) => {
+      const fastest = fastestByPerson.get(person.id);
+
+      return {
+        personId: person.id,
+        personName: person.display_name ?? person.name,
+        averageIntervalMs: fastest?.averageIntervalMs ?? null,
+        dateConsumedAt: fastest?.dateConsumedAt ?? null,
+        cupCount: fastest?.cupCount ?? 0,
+      };
+    });
+}
+
+function buildLoyalists(
+  eligibleDrinks: EligibleAnalyticsDrink[],
+  people: PersonRow[],
+): Loyalist[] {
+  const totalByPerson = new Map<number, number>();
+  const cupsByPerson = new Map<
+    number,
+    Map<
+      number,
+      {
+        cupName: string;
+        cupCount: number;
+        lastConsumedAtMs: number;
+      }
+    >
+  >();
+
+  for (const { drink, consumedAt } of eligibleDrinks) {
+    totalByPerson.set(
+      drink.person_id,
+      (totalByPerson.get(drink.person_id) ?? 0) + 1,
+    );
+
+    const cups = cupsByPerson.get(drink.person_id) ?? new Map();
+    const cup = cups.get(drink.cup_id) ?? {
+      cupName: drink.cup_name,
+      cupCount: 0,
+      lastConsumedAtMs: 0,
+    };
+
+    cup.cupCount += 1;
+    cup.lastConsumedAtMs = Math.max(cup.lastConsumedAtMs, consumedAt.getTime());
+    cups.set(drink.cup_id, cup);
+    cupsByPerson.set(drink.person_id, cups);
+  }
+
+  return [...people]
+    .sort((a, b) => a.id - b.id)
+    .map((person) => {
+      const totalCupCount = totalByPerson.get(person.id) ?? 0;
+      const favorite = [...(cupsByPerson.get(person.id)?.values() ?? [])].sort(
+        (a, b) =>
+          b.cupCount - a.cupCount ||
+          b.lastConsumedAtMs - a.lastConsumedAtMs ||
+          a.cupName.localeCompare(b.cupName),
+      )[0];
+
+      return {
+        personId: person.id,
+        personName: person.display_name ?? person.name,
+        percentage:
+          favorite && totalCupCount > 0
+            ? (favorite.cupCount / totalCupCount) * 100
+            : null,
+        cupCount: favorite?.cupCount ?? 0,
+        totalCupCount,
+        cupName: favorite?.cupName ?? null,
+      };
+    });
+}
+
 function buildEarlyBirds(
   eligibleDrinks: EligibleAnalyticsDrink[],
   people: PersonRow[],
@@ -1728,6 +1997,12 @@ function formatInterval(intervalMs: number) {
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+function formatPercentage(percentage: number) {
+  return `${percentage.toLocaleString("da-DK", {
+    maximumFractionDigits: 1,
+  })}%`;
 }
 
 function formatAnalyticsDate(value: string) {
