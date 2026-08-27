@@ -160,6 +160,12 @@ type EarlyBird = {
   consumedAt: string | null;
 };
 
+type NightOwl = {
+  personId: number;
+  personName: string;
+  consumedAt: string | null;
+};
+
 type EligibleAnalyticsDrink = {
   drink: AnalyticsDrinkRow;
   consumedAt: Date;
@@ -355,6 +361,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         selectedPeople,
       ),
       earlyBirds: buildEarlyBirds(eligibleAnalyticsDrinks, selectedPeople),
+      nightOwls: buildNightOwls(eligibleAnalyticsDrinks, selectedPeople),
       drinksPagination: {
         page: currentDrinksPage,
         pageSize: DRINKS_PAGE_SIZE,
@@ -378,6 +385,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       fastestDoublekills: [],
       typicalCooldowns: [],
       earlyBirds: [],
+      nightOwls: [],
       drinksPagination: {
         page: 1,
         pageSize: DRINKS_PAGE_SIZE,
@@ -399,6 +407,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     fastestDoublekills,
     typicalCooldowns,
     earlyBirds,
+    nightOwls,
     drinksPagination,
   } = loaderData;
   const paginationPages = getVisiblePages(
@@ -949,7 +958,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
 
         <Card className="border-zinc-800 bg-zinc-950/80">
           <CardHeader className="border-b border-zinc-800">
-            <CardTitle className="uppercase">Tidligste drink</CardTitle>
+            <CardTitle className="uppercase">A-mennesket</CardTitle>
             <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
               {analyticsChart.subtitle}
             </CardAction>
@@ -980,6 +989,66 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                 <p className="mt-1 text-xs text-zinc-500">
                   {earlyBird.consumedAt
                     ? formatAnalyticsDate(earlyBird.consumedAt)
+                    : "No drinks in this period."}
+                </p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card className="border-zinc-800 bg-zinc-950/80">
+          <CardHeader className="border-b border-zinc-800">
+            <CardTitle className="uppercase">Placeholder</CardTitle>
+            <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
+              {analyticsChart.subtitle}
+            </CardAction>
+          </CardHeader>
+          <CardContent className="space-y-5"></CardContent>
+        </Card>
+
+        <Card className="border-zinc-800 bg-zinc-950/80">
+          <CardHeader className="border-b border-zinc-800">
+            <CardTitle className="uppercase">Placeholder</CardTitle>
+            <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
+              {analyticsChart.subtitle}
+            </CardAction>
+          </CardHeader>
+          <CardContent className="space-y-5"></CardContent>
+        </Card>
+
+        <Card className="border-zinc-800 bg-zinc-950/80">
+          <CardHeader className="border-b border-zinc-800">
+            <CardTitle className="uppercase">Natteravnen</CardTitle>
+            <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
+              {analyticsChart.subtitle}
+            </CardAction>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {nightOwls.map((nightOwl) => (
+              <div key={nightOwl.personId}>
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="font-medium">{nightOwl.personName}</span>
+                  <span
+                    className="shrink-0 font-medium tabular-nums text-zinc-300"
+                    style={
+                      nightOwl.consumedAt
+                        ? {
+                            color: getPersonDisplayColor(
+                              nightOwl.personName,
+                              nightOwl.personId,
+                            ),
+                          }
+                        : undefined
+                    }
+                  >
+                    {nightOwl.consumedAt
+                      ? formatTime(nightOwl.consumedAt)
+                      : "—"}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {nightOwl.consumedAt
+                    ? formatAnalyticsDate(nightOwl.consumedAt)
                     : "No drinks in this period."}
                 </p>
               </div>
@@ -1608,6 +1677,39 @@ function buildEarlyBirds(
       personId: person.id,
       personName: person.display_name ?? person.name,
       consumedAt: earliestByPerson.get(person.id)?.consumedAt ?? null,
+    }));
+}
+
+function buildNightOwls(
+  eligibleDrinks: EligibleAnalyticsDrink[],
+  people: PersonRow[],
+): NightOwl[] {
+  const latestByPerson = new Map<
+    number,
+    { consumedAt: string; localTimeMs: number }
+  >();
+
+  for (const { drink, consumedAt } of eligibleDrinks) {
+    const date = getCopenhagenDateParts(consumedAt);
+    const localTimeMs =
+      ((date.hour * 60 + date.minute) * 60 + date.second) * 1000 +
+      consumedAt.getUTCMilliseconds();
+    const latest = latestByPerson.get(drink.person_id);
+
+    if (!latest || localTimeMs > latest.localTimeMs) {
+      latestByPerson.set(drink.person_id, {
+        consumedAt: drink.consumed_at,
+        localTimeMs,
+      });
+    }
+  }
+
+  return [...people]
+    .sort((a, b) => a.id - b.id)
+    .map((person) => ({
+      personId: person.id,
+      personName: person.display_name ?? person.name,
+      consumedAt: latestByPerson.get(person.id)?.consumedAt ?? null,
     }));
 }
 
