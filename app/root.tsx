@@ -70,7 +70,7 @@ export default function App() {
                   href="/"
                   className="px-3 font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50 focus:bg-zinc-800 focus:text-zinc-50"
                 >
-                  Home
+                  Statistik {/* Will still be called "Home" everywhere else */}
                 </NavigationMenuLink>
               </NavigationMenuItem>
               <NavigationMenuItem>

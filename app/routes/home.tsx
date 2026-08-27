@@ -67,6 +67,8 @@ import {
   CartesianGrid,
   Cell,
   LabelList,
+  Line,
+  LineChart,
   XAxis,
   YAxis,
 } from "recharts";
@@ -183,6 +185,56 @@ type NightOwl = {
   consumedAt: string | null;
 };
 
+type EconomyChartBucket = {
+  bucket: string;
+  total: number | null;
+  [personDataKey: string]: string | number | null;
+};
+
+type EconomyPerson = {
+  id: number;
+  name: string;
+  dataKey: string;
+  color: string;
+};
+
+type EconomyDay = {
+  dateKey: string;
+  dateConsumedAt: string;
+  totalCost: number;
+  people: Array<{
+    personId: number;
+    personName: string;
+    cost: number;
+    color: string;
+  }>;
+};
+
+type EconomyAnalytics = {
+  people: EconomyPerson[];
+  buckets: EconomyChartBucket[];
+  drinkCount: number;
+  totalCost: number;
+  copenhagenEquivalentCost: number;
+  estimatedSavings: number;
+  averageDailyCost: number;
+  elapsedDayCount: number;
+  mostExpensiveDay: EconomyDay | null;
+  cheapestDay: EconomyDay | null;
+};
+
+type MonthlyEconomyOverview = {
+  projectedCost: number;
+  currentCost: number;
+  expectedRemainingCost: number;
+  elapsedDayCount: number;
+  totalDayCount: number;
+  comparisonDayCount: number;
+  comparisonCurrentCost: number;
+  previousMonthCost: number;
+  percentageChange: number | null;
+};
+
 type EligibleAnalyticsDrink = {
   drink: AnalyticsDrinkRow;
   consumedAt: Date;
@@ -202,6 +254,8 @@ type AnalyticsPeriod = {
 };
 
 const DRINKS_PAGE_SIZE = 15;
+const COST_PER_DRINK = 1.38; // Rough average
+const PRICE_OF_DRINK_IN_CPH = 40;
 const CHART_NAMES = new Set(["paven", "burger lars"]); // Not everyone should be included in the chart
 const DEFAULT_ANALYTICS_NAMES = new Set(["paven", "burger lars"]);
 const ANALYTICS_RANGES: Array<{ value: AnalyticsRange; label: string }> = [
@@ -237,8 +291,10 @@ export function meta({}: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
+  const analyticsNow = new Date();
   const analyticsRange = parseAnalyticsRange(url.searchParams.get("range"));
-  const analyticsPeriod = getAnalyticsPeriod(analyticsRange);
+  const analyticsPeriod = getAnalyticsPeriod(analyticsRange, analyticsNow);
+  const monthlyEconomyQueryPeriod = getMonthlyEconomyQueryPeriod(analyticsNow);
   const requestedDrinksPage = Number.parseInt(
     url.searchParams.get("drinksPage") ?? "1",
     10,
@@ -302,11 +358,18 @@ export async function loader({ request }: Route.LoaderArgs) {
       ),
     ];
 
-    const analyticsDrinks =
+    const [analyticsDrinks, monthlyEconomyDrinks] =
       selectedPersonIds.length > 0
-        ? (await loadAnalyticsDrinks(selectedPersonIds, analyticsPeriod))
-            .results
-        : [];
+        ? await Promise.all([
+            loadAnalyticsDrinks(selectedPersonIds, analyticsPeriod).then(
+              (result) => result.results,
+            ),
+            loadAnalyticsDrinks(
+              selectedPersonIds,
+              monthlyEconomyQueryPeriod,
+            ).then((result) => result.results),
+          ])
+        : [[], []];
     const selectedPeople = people.filter((person) =>
       selectedPersonIds.includes(person.id),
     );
@@ -381,6 +444,16 @@ export async function loader({ request }: Route.LoaderArgs) {
       loyalists: buildLoyalists(eligibleAnalyticsDrinks, selectedPeople),
       earlyBirds: buildEarlyBirds(eligibleAnalyticsDrinks, selectedPeople),
       nightOwls: buildNightOwls(eligibleAnalyticsDrinks, selectedPeople),
+      economyAnalytics: buildEconomyAnalytics(
+        eligibleAnalyticsDrinks,
+        selectedPeople,
+        analyticsPeriod,
+        analyticsNow,
+      ),
+      monthlyEconomyOverview: buildMonthlyEconomyOverview(
+        monthlyEconomyDrinks,
+        analyticsNow,
+      ),
       drinksPagination: {
         page: currentDrinksPage,
         pageSize: DRINKS_PAGE_SIZE,
@@ -407,6 +480,13 @@ export async function loader({ request }: Route.LoaderArgs) {
       loyalists: [],
       earlyBirds: [],
       nightOwls: [],
+      economyAnalytics: buildEconomyAnalytics(
+        [],
+        [],
+        analyticsPeriod,
+        analyticsNow,
+      ),
+      monthlyEconomyOverview: buildMonthlyEconomyOverview([], analyticsNow),
       drinksPagination: {
         page: 1,
         pageSize: DRINKS_PAGE_SIZE,
@@ -431,6 +511,8 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     loyalists,
     earlyBirds,
     nightOwls,
+    economyAnalytics,
+    monthlyEconomyOverview,
     drinksPagination,
   } = loaderData;
   const paginationPages = getVisiblePages(
@@ -454,6 +536,17 @@ export default function Home({ loaderData }: Route.ComponentProps) {
   const analyticsTimeChartMinWidth = Math.max(
     760,
     analyticsChart.buckets.length * 32,
+  );
+  const economyChartConfig: ChartConfig = Object.fromEntries([
+    ...economyAnalytics.people.map((person) => [
+      person.dataKey,
+      { label: person.name, color: person.color },
+    ]),
+    ["total", { label: "Total", color: "#22c55e" }],
+  ]);
+  const economyChartMinWidth = Math.max(
+    760,
+    economyAnalytics.buckets.length * 32,
   );
   const selectedPeople = people.filter((person) =>
     analytics.selectedPersonIds.includes(person.id),
@@ -820,7 +913,13 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                   />
                   <ChartTooltip
                     cursor={false}
-                    content={<ChartTooltipContent />}
+                    content={
+                      <ChartTooltipContent
+                        labelFormatter={(_, payload) =>
+                          payload?.[0]?.payload?.tooltipLabel ?? ""
+                        }
+                      />
+                    }
                   />
                   <ChartLegend content={<ChartLegendContent />} />
                   {analyticsChart.people.map((person) => (
@@ -1251,7 +1350,448 @@ export default function Home({ loaderData }: Route.ComponentProps) {
         </CardContent>
       </Card>
 
-      <Card className="border-zinc-800 bg-zinc-950/80 lg:col-span-4">
+      <section className="space-y-4 lg:col-span-4" aria-label="Økonomi">
+        <Card className="ring-0 border-zinc-800 bg-zinc-950/80">
+          <CardHeader className="border-b border-zinc-800">
+            <CardTitle className="flex items-center gap-1.5 uppercase">
+              Økonomi{" "}
+              <Tooltip.Root>
+                <Tooltip.Trigger
+                  type="button"
+                  delay={150}
+                  aria-label="What does økonomi mean, how is it calculated?"
+                  className="inline-flex size-5 cursor-pointer items-center justify-center rounded-full text-zinc-500 transition-colors hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+                >
+                  <Info className="size-3.5" aria-hidden="true" />
+                </Tooltip.Trigger>
+                <Tooltip.Portal>
+                  <Tooltip.Positioner sideOffset={8}>
+                    <Tooltip.Popup className="z-50 max-w-64 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs leading-5 font-normal tracking-normal text-zinc-200 normal-case shadow-lg transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0">
+                      Prisen pr. kop er fastlagt til 1,38kr.
+                      <br />
+                      <br />
+                      Økonomien er tæt på umulig at kortlægge helt præcist, da
+                      prisen pr. kop er tæt på umulig at estimere præcist. Vi
+                      laver både kaffe med friskkværnede bønner og kapsler, og
+                      prisen varierer dermed rigtig meget alt efter typen af
+                      bønner og kapsler — og prisen på samme bønner og kapsler
+                      varierer ligeledes. Det varierer også meget om vi bruger
+                      mælk, fløde eller sirup i kaffen (eller hvad man nu er
+                      til), men det er ikke medregnet her.
+                      <br />
+                      <br />
+                      Vi køber både bønner og kapsler fra{" "}
+                      <a
+                        href="https://kaffek.dk/"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-zinc-100 underline underline-offset-2 hover:text-white"
+                      >
+                        KaffeK, tidligere Kaffekapslen.dk
+                      </a>
+                      , hvor prisen kan kontrolleres.
+                    </Tooltip.Popup>
+                  </Tooltip.Positioner>
+                </Tooltip.Portal>
+              </Tooltip.Root>
+              <span className="ml-2 text-zinc-500 normal-case">
+                Gode tider på SU
+              </span>
+            </CardTitle>
+            <CardAction className="text-sm font-medium uppercase text-zinc-400">
+              {analyticsChart.subtitle}
+            </CardAction>
+          </CardHeader>
+          <CardContent>
+            {economyAnalytics.totalCost > 0 ? (
+              <div className="overflow-x-auto pb-2">
+                <ChartContainer
+                  config={economyChartConfig}
+                  className="h-80 w-full aspect-auto"
+                  style={{ minWidth: economyChartMinWidth }}
+                  initialDimension={{ width: 1040, height: 320 }}
+                >
+                  <LineChart
+                    accessibilityLayer
+                    data={economyAnalytics.buckets}
+                    margin={{ top: 12, right: 12, left: 8, bottom: 0 }}
+                  >
+                    <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                    <XAxis
+                      dataKey="bucket"
+                      axisLine={false}
+                      tickLine={false}
+                      tickMargin={10}
+                      interval={0}
+                    />
+                    <YAxis
+                      axisLine={false}
+                      tickLine={false}
+                      tickMargin={8}
+                      domain={[0, "dataMax"]}
+                      tickFormatter={(value: number) => `${value} kr.`}
+                      width={64}
+                    />
+                    <ChartTooltip
+                      cursor={false}
+                      content={
+                        <ChartTooltipContent
+                          labelFormatter={(_, payload) =>
+                            payload?.[0]?.payload?.tooltipLabel ?? ""
+                          }
+                          formatter={(value, name, item) => (
+                            <>
+                              <div
+                                className="size-2.5 shrink-0 rounded-xs"
+                                style={{ backgroundColor: item.color }}
+                              />
+                              <div className="flex flex-1 items-center justify-between gap-4 leading-none">
+                                <span className="text-muted-foreground">
+                                  {economyChartConfig[String(name)]?.label ??
+                                    name}
+                                </span>
+                                <span className="font-mono font-medium text-foreground tabular-nums">
+                                  {formatCurrency(Number(value))}
+                                </span>
+                              </div>
+                            </>
+                          )}
+                        />
+                      }
+                    />
+                    <ChartLegend content={<ChartLegendContent />} />
+                    {economyAnalytics.people.map((person) => (
+                      <Line
+                        key={person.id}
+                        type="linear"
+                        dataKey={person.dataKey}
+                        stroke={`var(--color-${person.dataKey})`}
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 4 }}
+                      />
+                    ))}
+                    {economyAnalytics.people.length > 1 && (
+                      <Line
+                        type="linear"
+                        dataKey="total"
+                        stroke="var(--color-total)"
+                        strokeWidth={3}
+                        dot={false}
+                        activeDot={{ r: 5 }}
+                      />
+                    )}
+                  </LineChart>
+                </ChartContainer>
+              </div>
+            ) : (
+              <div className="flex h-64 items-center justify-center text-sm text-zinc-400">
+                No drinks recorded for this selection.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Card className="border-zinc-800 bg-zinc-950/80">
+            <CardHeader className="border-b border-zinc-800">
+              <CardTitle className="uppercase">Gennemsnit pr. dag</CardTitle>
+              <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
+                {analyticsChart.subtitle}
+              </CardAction>
+            </CardHeader>
+            <CardContent>
+              {economyAnalytics.elapsedDayCount > 0 ? (
+                <>
+                  <p className="text-2xl font-semibold tabular-nums text-green-500">
+                    {formatCurrency(economyAnalytics.averageDailyCost)}
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Fordelt over {economyAnalytics.elapsedDayCount}{" "}
+                    {economyAnalytics.elapsedDayCount === 1
+                      ? "kalenderdag"
+                      : "kalenderdage"}
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-zinc-500">
+                  No drinks in this period.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="border-zinc-800 bg-zinc-950/80">
+            <CardHeader className="border-b border-zinc-800">
+              <CardTitle className="uppercase">Dyreste dag</CardTitle>
+              <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
+                {economyAnalytics.mostExpensiveDay
+                  ? formatAnalyticsDate(
+                      economyAnalytics.mostExpensiveDay.dateConsumedAt,
+                    )
+                  : "—"}
+              </CardAction>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {economyAnalytics.mostExpensiveDay ? (
+                <>
+                  {economyAnalytics.mostExpensiveDay.people.map((person) => (
+                    <div
+                      key={person.personId}
+                      className="flex items-baseline justify-between gap-3"
+                    >
+                      <span className="font-medium">{person.personName}</span>
+                      <span
+                        className="shrink-0 font-medium tabular-nums"
+                        style={{ color: person.color }}
+                      >
+                        {formatCurrency(person.cost)}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="flex items-baseline justify-between gap-3 border-t border-zinc-800 pt-2">
+                    <span className="font-semibold">Total</span>
+                    <span className="shrink-0 font-semibold tabular-nums text-green-500">
+                      {formatCurrency(
+                        economyAnalytics.mostExpensiveDay.totalCost,
+                      )}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-zinc-500">
+                  No drinks in this period.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="border-zinc-800 bg-zinc-950/80">
+            <CardHeader className="border-b border-zinc-800">
+              <CardTitle className="flex items-center gap-1.5 uppercase">
+                Billigste dag
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    type="button"
+                    delay={150}
+                    aria-label="What does cheapest day mean?"
+                    className="inline-flex size-5 cursor-pointer items-center justify-center rounded-full text-zinc-500 transition-colors hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+                  >
+                    <Info className="size-3.5" aria-hidden="true" />
+                  </Tooltip.Trigger>
+                  <Tooltip.Portal>
+                    <Tooltip.Positioner sideOffset={8}>
+                      <Tooltip.Popup className="z-50 max-w-64 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs leading-5 font-normal tracking-normal text-zinc-200 normal-case shadow-lg transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0">
+                        Billigste dag er udregnet for dage, hvor mindst én kop
+                        er registreret. Det betyder, at der også inkluderes dage
+                        hvor en person har drukket for 0kr., men dage, hvor
+                        ingen har drukket kaffe bliver ignoreret - selvom en
+                        samlet pris på 0kr. ellers ville være billigst.
+                      </Tooltip.Popup>
+                    </Tooltip.Positioner>
+                  </Tooltip.Portal>
+                </Tooltip.Root>
+              </CardTitle>
+              <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
+                {economyAnalytics.cheapestDay
+                  ? formatAnalyticsDate(
+                      economyAnalytics.cheapestDay.dateConsumedAt,
+                    )
+                  : "—"}
+              </CardAction>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {economyAnalytics.cheapestDay ? (
+                <>
+                  {economyAnalytics.cheapestDay.people.map((person) => (
+                    <div
+                      key={person.personId}
+                      className="flex items-baseline justify-between gap-3"
+                    >
+                      <span className="font-medium">{person.personName}</span>
+                      <span
+                        className="shrink-0 font-medium tabular-nums"
+                        style={{ color: person.color }}
+                      >
+                        {formatCurrency(person.cost)}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="flex items-baseline justify-between gap-3 border-t border-zinc-800 pt-2">
+                    <span className="font-semibold">Total</span>
+                    <span className="shrink-0 font-semibold tabular-nums text-green-500">
+                      {formatCurrency(economyAnalytics.cheapestDay.totalCost)}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-zinc-500">
+                  No drinks in this period.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="border-zinc-800 bg-zinc-950/80">
+            <CardHeader className="border-b border-zinc-800">
+              <CardTitle className="flex items-center gap-1.5 uppercase">
+                Estimeret total
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    type="button"
+                    delay={150}
+                    aria-label="What does estimated total mean?"
+                    className="inline-flex size-5 cursor-pointer items-center justify-center rounded-full text-zinc-500 transition-colors hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+                  >
+                    <Info className="size-3.5" aria-hidden="true" />
+                  </Tooltip.Trigger>
+                  <Tooltip.Portal>
+                    <Tooltip.Positioner sideOffset={8}>
+                      <Tooltip.Popup className="z-50 max-w-64 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs leading-5 font-normal tracking-normal text-zinc-200 normal-case shadow-lg transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0">
+                        Estimeret total er en projektion af, hvad vi forventer
+                        at hele måneden kommer til at koste Den er udregnet ud
+                        fra det nuværende daglige gennemsnit, og bliver dermed
+                        mere og mere præcis, som måneden skrider frem.
+                        <br />
+                        <br />
+                        Det estimerede total respekterer ikke filtre, og vil
+                        atid vise den nuværende måned.
+                      </Tooltip.Popup>
+                    </Tooltip.Positioner>
+                  </Tooltip.Portal>
+                </Tooltip.Root>
+              </CardTitle>
+              <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
+                This month
+              </CardAction>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-semibold tabular-nums text-green-500">
+                {formatCurrency(monthlyEconomyOverview.projectedCost)}
+              </p>
+              <p className="mt-1 text-xs text-zinc-500">
+                {formatCurrency(monthlyEconomyOverview.currentCost)} brugt ·{" "}
+                {formatCurrency(monthlyEconomyOverview.expectedRemainingCost)}{" "}
+                forventet resten af måneden
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-zinc-800 bg-zinc-950/80">
+            <CardHeader className="border-b border-zinc-800">
+              <CardTitle className="flex items-center gap-1.5 uppercase">
+                Mod sidste måned
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    type="button"
+                    delay={150}
+                    aria-label="What does mod sidste måned mean?"
+                    className="inline-flex size-5 cursor-pointer items-center justify-center rounded-full text-zinc-500 transition-colors hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+                  >
+                    <Info className="size-3.5" aria-hidden="true" />
+                  </Tooltip.Trigger>
+                  <Tooltip.Portal>
+                    <Tooltip.Positioner sideOffset={8}>
+                      <Tooltip.Popup className="z-50 max-w-64 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs leading-5 font-normal tracking-normal text-zinc-200 normal-case shadow-lg transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0">
+                        Sammenligning af det nuværende forbrug efter samme antal
+                        dage i sidste måned.
+                        <br />
+                        <br />
+                        Sammenligningen respekterer ikke filtre, og vil atid
+                        vise den nuværende måned mod sidste måned.
+                      </Tooltip.Popup>
+                    </Tooltip.Positioner>
+                  </Tooltip.Portal>
+                </Tooltip.Root>
+              </CardTitle>
+              <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
+                This month
+              </CardAction>
+            </CardHeader>
+            <CardContent>
+              <p
+                className={cn(
+                  "text-2xl font-semibold tabular-nums",
+                  monthlyEconomyOverview.percentageChange === null ||
+                    monthlyEconomyOverview.percentageChange === 0
+                    ? "text-zinc-300"
+                    : monthlyEconomyOverview.percentageChange > 0
+                      ? "text-red-400"
+                      : "text-green-500",
+                )}
+              >
+                {monthlyEconomyOverview.percentageChange === null
+                  ? "N/A"
+                  : formatSignedPercentage(
+                      monthlyEconomyOverview.percentageChange,
+                    )}
+              </p>
+              <p className="mt-1 text-xs text-zinc-500">
+                {formatCurrency(monthlyEconomyOverview.comparisonCurrentCost)}{" "}
+                mod {formatCurrency(monthlyEconomyOverview.previousMonthCost)}{" "}
+                efter {monthlyEconomyOverview.comparisonDayCount} dage
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-zinc-800 bg-zinc-950/80">
+            <CardHeader className="border-b border-zinc-800">
+              <CardTitle className="flex items-center gap-1.5 uppercase">
+                Penge sparet
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    type="button"
+                    delay={150}
+                    aria-label="What does penge sparet mean mean?"
+                    className="inline-flex size-5 cursor-pointer items-center justify-center rounded-full text-zinc-500 transition-colors hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+                  >
+                    <Info className="size-3.5" aria-hidden="true" />
+                  </Tooltip.Trigger>
+                  <Tooltip.Portal>
+                    <Tooltip.Positioner sideOffset={8}>
+                      <Tooltip.Popup className="z-50 max-w-64 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs leading-5 font-normal tracking-normal text-zinc-200 normal-case shadow-lg transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0">
+                        Udregning af, hvor mange penge vi har sparet ift. at
+                        købe vores kaffe ude på en café i København.
+                        <br />
+                        <br />
+                        Prisen på en kaffe fra en Københavnercafé er svær at
+                        fastlægge, men vi har regnet med 20kr. for en
+                        filterkaffe og 50kr. for en latte (fuldstændig
+                        vanvittigt, velkommen til København). Dermed har vi
+                        fastlagt prisen pr. kaffe fra en café til 40kr., da vi
+                        bruger vores espressomaskine betydeligt mere, end vi
+                        bruger vores kapsler.
+                      </Tooltip.Popup>
+                    </Tooltip.Positioner>
+                  </Tooltip.Portal>
+                </Tooltip.Root>
+              </CardTitle>
+              <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
+                {analyticsChart.subtitle}
+              </CardAction>
+            </CardHeader>
+            <CardContent>
+              <p
+                className={cn(
+                  "text-2xl font-semibold tabular-nums",
+                  economyAnalytics.estimatedSavings >= 0
+                    ? "text-green-500"
+                    : "text-red-400",
+                )}
+              >
+                {formatCurrency(economyAnalytics.estimatedSavings)}
+              </p>
+              <p className="mt-1 text-xs text-zinc-500">
+                Sammenlignet med {economyAnalytics.drinkCount}{" "}
+                {economyAnalytics.drinkCount === 1 ? "kop" : "kopper"} á{" "}
+                {formatCurrency(PRICE_OF_DRINK_IN_CPH)}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+
+      <Card className="border-zinc-800 bg-zinc-950/80 lg:col-span-4 mt-30">
         <CardHeader className="border-b border-zinc-800">
           <CardTitle>All Drinks</CardTitle>
         </CardHeader>
@@ -1447,6 +1987,21 @@ const shortDateFormatter = new Intl.DateTimeFormat("en-GB", {
   month: "short",
 });
 
+const monthDayFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: "UTC",
+  month: "short",
+  day: "numeric",
+});
+
+function getChartBucketTooltipLabel(
+  bucket: { key: string; label: string },
+  range: AnalyticsRange,
+) {
+  return range === "month"
+    ? monthDayFormatter.format(new Date(`${bucket.key}T00:00:00.000Z`))
+    : bucket.label;
+}
+
 const weekdayFormatter = new Intl.DateTimeFormat("en-GB", {
   timeZone: "UTC",
   weekday: "short",
@@ -1546,6 +2101,17 @@ function getAnalyticsPeriod(
   };
 }
 
+function getMonthlyEconomyQueryPeriod(now: Date) {
+  const date = getCopenhagenDateParts(now);
+  const previousMonthStartMs = Date.UTC(date.year, date.month - 2, 1);
+  const nextMonthStartMs = Date.UTC(date.year, date.month, 1);
+
+  return {
+    queryStart: new Date(previousMonthStartMs - ONE_DAY_MS).toISOString(),
+    queryEnd: new Date(nextMonthStartMs + ONE_DAY_MS).toISOString(),
+  };
+}
+
 function getCopenhagenDateParts(date: Date) {
   const parts = copenhagenDatePartsFormatter.formatToParts(date);
   const value = (type: Intl.DateTimeFormatPartTypes) =>
@@ -1571,7 +2137,7 @@ function getLocalDateKey(date: Date) {
 
 async function loadAnalyticsDrinks(
   selectedPersonIds: number[],
-  period: AnalyticsPeriod,
+  period: Pick<AnalyticsPeriod, "queryStart" | "queryEnd">,
 ) {
   const personPlaceholders = selectedPersonIds.map(() => "?").join(", ");
   const dateClause =
@@ -1982,6 +2548,265 @@ function buildNightOwls(
     }));
 }
 
+function buildEconomyAnalytics(
+  eligibleDrinks: EligibleAnalyticsDrink[],
+  selectedPeople: PersonRow[],
+  period: AnalyticsPeriod,
+  now = new Date(),
+): EconomyAnalytics {
+  const people: EconomyPerson[] = [...selectedPeople]
+    .sort((a, b) => a.id - b.id)
+    .map((person) => {
+      const name = person.display_name ?? person.name;
+
+      return {
+        id: person.id,
+        name,
+        dataKey: `economy_person_${person.id}`,
+        color: getPersonDisplayColor(name, person.id),
+      };
+    });
+  const countsByBucket = new Map<string, Map<number, number>>();
+  const dynamicBuckets = new Map<string, string>();
+  const days = new Map<
+    string,
+    { dateConsumedAt: string; countsByPerson: Map<number, number> }
+  >();
+
+  for (const { drink, consumedAt } of eligibleDrinks) {
+    const date = getCopenhagenDateParts(consumedAt);
+    const bucket = getAnalyticsBucket(date, period);
+
+    if (!bucket) continue;
+
+    dynamicBuckets.set(bucket.key, bucket.label);
+    const bucketCounts = countsByBucket.get(bucket.key) ?? new Map();
+    bucketCounts.set(
+      drink.person_id,
+      (bucketCounts.get(drink.person_id) ?? 0) + 1,
+    );
+    countsByBucket.set(bucket.key, bucketCounts);
+
+    const dateKey = `${date.year}-${String(date.month).padStart(2, "0")}-${String(date.day).padStart(2, "0")}`;
+    const day = days.get(dateKey) ?? {
+      dateConsumedAt: drink.consumed_at,
+      countsByPerson: new Map<number, number>(),
+    };
+    day.countsByPerson.set(
+      drink.person_id,
+      (day.countsByPerson.get(drink.person_id) ?? 0) + 1,
+    );
+    days.set(dateKey, day);
+  }
+
+  const chartBuckets =
+    period.range === "all"
+      ? [...dynamicBuckets.entries()]
+          .sort(([keyA], [keyB]) => keyA.localeCompare(keyB))
+          .map(([key, label]) => ({ key, label }))
+      : period.buckets;
+  const currentDate = getCopenhagenDateParts(now);
+  const buckets: EconomyChartBucket[] = chartBuckets.map((bucket) => {
+    const isFutureBucket =
+      period.range === "today"
+        ? Number(bucket.key.replace("hour_", "")) > currentDate.hour
+        : period.range === "week" || period.range === "month"
+          ? bucket.key >
+            `${currentDate.year}-${String(currentDate.month).padStart(2, "0")}-${String(currentDate.day).padStart(2, "0")}`
+          : false;
+
+    if (isFutureBucket) {
+      const chartBucket: EconomyChartBucket = {
+        bucket: bucket.label,
+        tooltipLabel: getChartBucketTooltipLabel(bucket, period.range),
+        total: null,
+      };
+
+      for (const person of people) {
+        chartBucket[person.dataKey] = null;
+      }
+
+      return chartBucket;
+    }
+
+    const counts = countsByBucket.get(bucket.key);
+    const chartBucket: EconomyChartBucket = {
+      bucket: bucket.label,
+      tooltipLabel: getChartBucketTooltipLabel(bucket, period.range),
+      total: roundCurrency(
+        [...(counts?.values() ?? [])].reduce(
+          (total, count) => total + count,
+          0,
+        ) * COST_PER_DRINK,
+      ),
+    };
+
+    for (const person of people) {
+      chartBucket[person.dataKey] = roundCurrency(
+        (counts?.get(person.id) ?? 0) * COST_PER_DRINK,
+      );
+    }
+
+    return chartBucket;
+  });
+  const dailyStats: EconomyDay[] = [...days.entries()]
+    .sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
+    .map(([dateKey, day]) => {
+      const dayPeople = people.map((person) => ({
+        personId: person.id,
+        personName: person.name,
+        cost: roundCurrency(
+          (day.countsByPerson.get(person.id) ?? 0) * COST_PER_DRINK,
+        ),
+        color: person.color,
+      }));
+
+      return {
+        dateKey,
+        dateConsumedAt: day.dateConsumedAt,
+        totalCost: roundCurrency(
+          [...day.countsByPerson.values()].reduce(
+            (total, count) => total + count,
+            0,
+          ) * COST_PER_DRINK,
+        ),
+        people: dayPeople,
+      };
+    });
+  const totalCost = roundCurrency(eligibleDrinks.length * COST_PER_DRINK);
+  const copenhagenEquivalentCost = roundCurrency(
+    eligibleDrinks.length * PRICE_OF_DRINK_IN_CPH,
+  );
+  const elapsedDayCount = getEconomyElapsedDayCount(dailyStats, period, now);
+  const byHighestCost = [...dailyStats].sort(
+    (a, b) => b.totalCost - a.totalCost || b.dateKey.localeCompare(a.dateKey),
+  );
+  const byLowestCost = [...dailyStats].sort(
+    (a, b) => a.totalCost - b.totalCost || b.dateKey.localeCompare(a.dateKey),
+  );
+
+  return {
+    people,
+    buckets,
+    drinkCount: eligibleDrinks.length,
+    totalCost,
+    copenhagenEquivalentCost,
+    estimatedSavings: roundCurrency(copenhagenEquivalentCost - totalCost),
+    averageDailyCost:
+      elapsedDayCount > 0 ? roundCurrency(totalCost / elapsedDayCount) : 0,
+    elapsedDayCount,
+    mostExpensiveDay: byHighestCost[0] ?? null,
+    cheapestDay: byLowestCost[0] ?? null,
+  };
+}
+
+function buildMonthlyEconomyOverview(
+  drinks: AnalyticsDrinkRow[],
+  now: Date,
+): MonthlyEconomyOverview {
+  const currentDate = getCopenhagenDateParts(now);
+  const previousMonthDate = new Date(
+    Date.UTC(currentDate.year, currentDate.month - 2, 1),
+  );
+  const previousMonthYear = previousMonthDate.getUTCFullYear();
+  const previousMonth = previousMonthDate.getUTCMonth() + 1;
+  const totalDayCount = new Date(
+    Date.UTC(currentDate.year, currentDate.month, 0),
+  ).getUTCDate();
+  const previousMonthDayCount = new Date(
+    Date.UTC(previousMonthYear, previousMonth, 0),
+  ).getUTCDate();
+  const comparisonDayCount = Math.min(currentDate.day, previousMonthDayCount);
+  let currentDrinkCount = 0;
+  let comparisonCurrentDrinkCount = 0;
+  let previousMonthDrinkCount = 0;
+
+  for (const drink of drinks) {
+    const consumedAt = parseUtcDateTime(drink.consumed_at);
+
+    if (!consumedAt) continue;
+
+    const date = getCopenhagenDateParts(consumedAt);
+    const isCurrentMonth =
+      date.year === currentDate.year && date.month === currentDate.month;
+    const isPreviousMonth =
+      date.year === previousMonthYear && date.month === previousMonth;
+
+    if (isCurrentMonth && date.day <= currentDate.day) {
+      currentDrinkCount += 1;
+
+      if (date.day <= comparisonDayCount) {
+        comparisonCurrentDrinkCount += 1;
+      }
+    } else if (isPreviousMonth && date.day <= comparisonDayCount) {
+      previousMonthDrinkCount += 1;
+    }
+  }
+
+  const currentCost = roundCurrency(currentDrinkCount * COST_PER_DRINK);
+  const comparisonCurrentCost = roundCurrency(
+    comparisonCurrentDrinkCount * COST_PER_DRINK,
+  );
+  const previousMonthCost = roundCurrency(
+    previousMonthDrinkCount * COST_PER_DRINK,
+  );
+  const projectedCost = roundCurrency(
+    (currentCost / currentDate.day) * totalDayCount,
+  );
+
+  return {
+    projectedCost,
+    currentCost,
+    expectedRemainingCost: roundCurrency(projectedCost - currentCost),
+    elapsedDayCount: currentDate.day,
+    totalDayCount,
+    comparisonDayCount,
+    comparisonCurrentCost,
+    previousMonthCost,
+    percentageChange:
+      previousMonthCost > 0
+        ? ((comparisonCurrentCost - previousMonthCost) / previousMonthCost) *
+          100
+        : comparisonCurrentCost === 0
+          ? 0
+          : null,
+  };
+}
+
+function getEconomyElapsedDayCount(
+  dailyStats: EconomyDay[],
+  period: AnalyticsPeriod,
+  now: Date,
+) {
+  const nowParts = getCopenhagenDateParts(now);
+  const todayMs = Date.UTC(nowParts.year, nowParts.month - 1, nowParts.day);
+
+  if (period.range === "all") {
+    const firstDateKey = dailyStats[0]?.dateKey;
+
+    if (!firstDateKey) return 0;
+
+    const [year, month, day] = firstDateKey.split("-").map(Number);
+    const firstDayMs = Date.UTC(year, month - 1, day);
+
+    return Math.max(1, Math.floor((todayMs - firstDayMs) / ONE_DAY_MS) + 1);
+  }
+
+  if (period.localStartMs === null || period.localEndMs === null) return 0;
+
+  const periodDayCount = Math.round(
+    (period.localEndMs - period.localStartMs) / ONE_DAY_MS,
+  );
+  const elapsedDayCount =
+    Math.floor((todayMs - period.localStartMs) / ONE_DAY_MS) + 1;
+
+  return Math.max(1, Math.min(periodDayCount, elapsedDayCount));
+}
+
+function roundCurrency(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
 function formatInterval(intervalMs: number) {
   const totalSeconds = Math.floor(intervalMs / 1000);
   const days = Math.floor(totalSeconds / 86_400);
@@ -2003,6 +2828,21 @@ function formatPercentage(percentage: number) {
   return `${percentage.toLocaleString("da-DK", {
     maximumFractionDigits: 1,
   })}%`;
+}
+
+function formatSignedPercentage(percentage: number) {
+  const sign = percentage > 0 ? "+" : "";
+
+  return `${sign}${formatPercentage(percentage)}`;
+}
+
+function formatCurrency(value: number) {
+  return value.toLocaleString("da-DK", {
+    style: "currency",
+    currency: "DKK",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 function formatAnalyticsDate(value: string) {
@@ -2107,7 +2947,10 @@ function buildAnalyticsChart(
           .map(([key, label]) => ({ key, label }))
       : period.buckets;
   const buckets: AnalyticsChartBucket[] = periodBuckets.map((bucket) => {
-    const chartBucket: AnalyticsChartBucket = { bucket: bucket.label };
+    const chartBucket: AnalyticsChartBucket = {
+      bucket: bucket.label,
+      tooltipLabel: getChartBucketTooltipLabel(bucket, period.range),
+    };
     const bucketCounts = countsByBucket.get(bucket.key);
 
     for (const person of people) {
