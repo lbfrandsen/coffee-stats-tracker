@@ -281,10 +281,10 @@ const analyticsCupsChartConfig = {
 
 export function meta({}: Route.MetaArgs) {
   return [
-    { title: "Leaderboard | Kaffemændene" },
+    { title: "Kaffemændene | Statistik" },
     {
       name: "description",
-      content: "Coffee leaderboard.",
+      content: "Coffee statistics.",
     },
   ];
 }
