@@ -348,6 +348,13 @@ const MONSTER_PRICE = 15;
 const SUSHI_PRICE = 269;
 const LIFETIME_ECONOMY_PRODUCTS = [
   {
+    key: "monster",
+    productName: "Monnere",
+    price: MONSTER_PRICE,
+    imageUrl:
+      "https://assets.kaffe.lucasfrandsen.dk/economy-pics/monster-can.webp",
+  },
+  {
     key: "airpods-pro-3",
     productName: "AirPods Pro 3",
     price: AIR_PODS_PRICE,
@@ -361,13 +368,7 @@ const LIFETIME_ECONOMY_PRODUCTS = [
     imageUrl:
       "https://assets.kaffe.lucasfrandsen.dk/economy-pics/rainbow-cookies.webp",
   },
-  {
-    key: "monster",
-    productName: "Monnere",
-    price: MONSTER_PRICE,
-    imageUrl:
-      "https://assets.kaffe.lucasfrandsen.dk/economy-pics/monster-can.webp",
-  },
+
   {
     key: "sushi",
     productName: "gange Sushi Ad Libitum",
