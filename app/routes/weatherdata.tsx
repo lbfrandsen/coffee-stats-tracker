@@ -1,9 +1,28 @@
 import { env } from "cloudflare:workers";
 import { Cloud, CloudRain, CloudSun } from "lucide-react";
 import { useLoaderData } from "react-router";
+import {
+  CartesianGrid,
+  ReferenceLine,
+  Scatter,
+  ScatterChart,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 import type { Route } from "./+types/weatherdata";
-import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "~/components/ui/card";
+import {
+  ChartContainer,
+  ChartTooltip,
+  type ChartConfig,
+} from "~/components/ui/chart";
 import { formatDateTime } from "~/lib/date-time";
 import { getPersonDisplayColor } from "~/lib/person-colors";
 
@@ -45,9 +64,36 @@ type WeatherCategoryStat = {
   }>;
 };
 
+type TemperatureCupDayRow = {
+  day: string;
+  average_temperature: number;
+  cup_count: number;
+};
+
+type TemperatureCupPoint = {
+  date: string;
+  dateLabel: string;
+  temperature: number;
+  cups: number;
+};
+
+type WeatherExtremeKind = "coldest" | "warmest" | "wettest" | "windiest";
+
+type WeatherExtremeRow = {
+  kind: WeatherExtremeKind;
+  value: number;
+  drink_id: number;
+  consumed_at: string;
+  cup_name: string;
+  person_id: number;
+  person_name: string;
+};
+
 type WeatherLoaderData = {
   latestCupWeather: LatestCupWeatherRow | null;
   weatherCategoryStats: WeatherCategoryStat[];
+  temperatureCupPoints: TemperatureCupPoint[];
+  weatherExtremes: WeatherExtremeRow[];
 };
 
 const WEATHER_CATEGORY_ORDER: WeatherCategory[] = ["sunny", "cloudy", "rainy"];
@@ -58,10 +104,42 @@ const WEATHER_CATEGORY_DETAILS = {
   rainy: { label: "Regnvejr", Icon: CloudRain },
 } as const;
 
+const WEATHER_EXTREME_ORDER: WeatherExtremeKind[] = [
+  "coldest",
+  "warmest",
+  "wettest",
+  "windiest",
+];
+
+const WEATHER_EXTREME_DETAILS = {
+  coldest: { label: "Koldeste kop" },
+  warmest: { label: "Varmeste kop" },
+  wettest: { label: "Vådeste kop" },
+  windiest: { label: "Mest blæsende kop" },
+} as const;
+
 const TEMPERATURE_FORMATTER = new Intl.NumberFormat("da-DK", {
   minimumFractionDigits: 1,
   maximumFractionDigits: 1,
 });
+
+const CHART_DATE_FORMATTER = new Intl.DateTimeFormat("da-DK", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+const temperatureCupsChartConfig = {
+  cups: {
+    label: "Kopper pr. dag",
+    color: "var(--color-cyan-300)",
+  },
+  trend: {
+    label: "Trend",
+    color: "var(--color-teal-300)",
+  },
+} satisfies ChartConfig;
 
 const WEATHER_BACKDROPS = {
   sunny: {
@@ -92,7 +170,12 @@ export async function loader(
   _args: Route.LoaderArgs,
 ): Promise<WeatherLoaderData> {
   try {
-    const [latestCupWeather, weatherCategoryResult] = await Promise.all([
+    const [
+      latestCupWeather,
+      weatherCategoryResult,
+      temperatureCupResult,
+      weatherExtremeResult,
+    ] = await Promise.all([
       env.DB.prepare(
         `
           SELECT
@@ -180,6 +263,123 @@ export async function loader(
             person_totals.person_id ASC
         `,
       ).all<WeatherCategoryStatRow>(),
+      env.DB.prepare(
+        `
+          WITH daily_weather AS (
+            SELECT
+              date(d.consumed_at) AS day,
+              AVG(w.temperature_c) AS average_temperature
+            FROM drinks d
+            JOIN weather_records w ON w.drink_id = d.id
+            WHERE w.temperature_c IS NOT NULL
+            GROUP BY date(d.consumed_at)
+          ),
+          daily_cups AS (
+            SELECT
+              date(consumed_at) AS day,
+              COUNT(*) AS cup_count
+            FROM drinks
+            GROUP BY date(consumed_at)
+          )
+          SELECT
+            daily_weather.day,
+            daily_weather.average_temperature,
+            daily_cups.cup_count
+          FROM daily_weather
+          JOIN daily_cups ON daily_cups.day = daily_weather.day
+          ORDER BY daily_weather.day ASC
+        `,
+      ).all<TemperatureCupDayRow>(),
+      env.DB.prepare(
+        `
+          WITH ranked AS (
+            SELECT
+              d.id AS drink_id,
+              d.consumed_at,
+              c.name AS cup_name,
+              p.id AS person_id,
+              COALESCE(p.display_name, p.name) AS person_name,
+              w.temperature_c,
+              w.precipitation_mm,
+              w.wind_speed_ms,
+              ROW_NUMBER() OVER (
+                ORDER BY
+                  w.temperature_c IS NULL,
+                  w.temperature_c ASC,
+                  d.consumed_at DESC,
+                  d.id DESC
+              ) AS coldest_rank,
+              ROW_NUMBER() OVER (
+                ORDER BY
+                  w.temperature_c IS NULL,
+                  w.temperature_c DESC,
+                  d.consumed_at DESC,
+                  d.id DESC
+              ) AS warmest_rank,
+              ROW_NUMBER() OVER (
+                ORDER BY
+                  w.precipitation_mm IS NULL,
+                  w.precipitation_mm DESC,
+                  d.consumed_at DESC,
+                  d.id DESC
+              ) AS wettest_rank,
+              ROW_NUMBER() OVER (
+                ORDER BY
+                  w.wind_speed_ms IS NULL,
+                  w.wind_speed_ms DESC,
+                  d.consumed_at DESC,
+                  d.id DESC
+              ) AS windiest_rank
+            FROM drinks d
+            JOIN weather_records w ON w.drink_id = d.id
+            JOIN cups c ON c.id = d.cup_id
+            JOIN persons p ON p.id = d.person_id
+          )
+          SELECT
+            'coldest' AS kind,
+            temperature_c AS value,
+            drink_id,
+            consumed_at,
+            cup_name,
+            person_id,
+            person_name
+          FROM ranked
+          WHERE coldest_rank = 1 AND temperature_c IS NOT NULL
+          UNION ALL
+          SELECT
+            'warmest',
+            temperature_c,
+            drink_id,
+            consumed_at,
+            cup_name,
+            person_id,
+            person_name
+          FROM ranked
+          WHERE warmest_rank = 1 AND temperature_c IS NOT NULL
+          UNION ALL
+          SELECT
+            'wettest',
+            precipitation_mm,
+            drink_id,
+            consumed_at,
+            cup_name,
+            person_id,
+            person_name
+          FROM ranked
+          WHERE wettest_rank = 1 AND precipitation_mm IS NOT NULL
+          UNION ALL
+          SELECT
+            'windiest',
+            wind_speed_ms,
+            drink_id,
+            consumed_at,
+            cup_name,
+            person_id,
+            person_name
+          FROM ranked
+          WHERE windiest_rank = 1 AND wind_speed_ms IS NOT NULL
+        `,
+      ).all<WeatherExtremeRow>(),
     ]);
 
     return {
@@ -187,6 +387,15 @@ export async function loader(
       weatherCategoryStats: buildWeatherCategoryStats(
         weatherCategoryResult.results,
       ),
+      temperatureCupPoints: temperatureCupResult.results.map((row) => ({
+        date: row.day,
+        dateLabel: CHART_DATE_FORMATTER.format(
+          new Date(`${row.day}T00:00:00Z`),
+        ),
+        temperature: row.average_temperature,
+        cups: row.cup_count,
+      })),
+      weatherExtremes: weatherExtremeResult.results,
     };
   } catch (error) {
     console.warn("Unable to load the latest cup weather from D1", error);
@@ -194,16 +403,23 @@ export async function loader(
     return {
       latestCupWeather: null,
       weatherCategoryStats: buildWeatherCategoryStats([]),
+      temperatureCupPoints: [],
+      weatherExtremes: [],
     };
   }
 }
 
 export default function WeatherData() {
-  const { latestCupWeather, weatherCategoryStats } =
-    useLoaderData<typeof loader>();
+  const {
+    latestCupWeather,
+    weatherCategoryStats,
+    temperatureCupPoints,
+    weatherExtremes,
+  } = useLoaderData<typeof loader>();
   const weatherBackdrop = latestCupWeather
     ? getWeatherBackdrop(latestCupWeather)
     : null;
+  const temperatureTrend = getLinearTrend(temperatureCupPoints);
 
   return (
     <main className="mx-auto max-w-6xl space-y-4 px-4 py-8 sm:px-6 lg:px-8">
@@ -310,7 +526,7 @@ export default function WeatherData() {
       </section>
 
       <section
-        className="grid gap-3 lg:grid-cols-3"
+        className="grid gap-3 lg:grid-cols-3 py-3"
         aria-label="Kaffe efter vejret"
       >
         {weatherCategoryStats.map((stat) => {
@@ -372,6 +588,196 @@ export default function WeatherData() {
                     </p>
                   )}
                 </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </section>
+
+      <section aria-label="Temperatur og kaffeforbrug">
+        <Card className="border-cyan-400/25 bg-zinc-950/80 ring-0">
+          <CardHeader className="border-b border-zinc-800">
+            <CardTitle className="uppercase">
+              Temperatur og kaffeforbrug
+            </CardTitle>
+            <CardAction className="text-sm font-medium uppercase text-zinc-400">
+              {temperatureCupPoints.length} dage med vejrdata
+            </CardAction>
+          </CardHeader>
+          <CardContent>
+            {temperatureCupPoints.length > 0 ? (
+              <ChartContainer
+                config={temperatureCupsChartConfig}
+                className="h-96 w-full aspect-auto [&_.recharts-cartesian-axis-tick-value]:fill-white! [&_.recharts-cartesian-axis-tick_text]:fill-white!"
+                initialDimension={{ width: 1040, height: 384 }}
+              >
+                <ScatterChart
+                  accessibilityLayer
+                  margin={{ top: 12, right: 20, left: 12, bottom: 20 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis
+                    type="number"
+                    dataKey="temperature"
+                    name="Temperatur"
+                    unit="°"
+                    tick={{ fill: "white" }}
+                    axisLine={false}
+                    tickLine={false}
+                    tickMargin={10}
+                    domain={[
+                      (dataMin: number) => Math.floor(dataMin) - 1,
+                      (dataMax: number) => Math.ceil(dataMax) + 1,
+                    ]}
+                    tickFormatter={(value: number) =>
+                      `${TEMPERATURE_FORMATTER.format(value)}`
+                    }
+                    label={{
+                      value: "Temperatur",
+                      position: "insideBottom",
+                      offset: -12,
+                      fill: "white",
+                    }}
+                  />
+                  <YAxis
+                    type="number"
+                    dataKey="cups"
+                    name="Kopper"
+                    tick={{ fill: "white" }}
+                    axisLine={false}
+                    tickLine={false}
+                    tickMargin={8}
+                    allowDecimals={false}
+                    domain={[
+                      0,
+                      (dataMax: number) => Math.max(1, Math.ceil(dataMax) + 1),
+                    ]}
+                    width={36}
+                    label={{
+                      value: "Kopper pr. dag",
+                      angle: -90,
+                      position: "insideLeft",
+                      offset: -4,
+                      fill: "white",
+                    }}
+                  />
+                  <ChartTooltip
+                    cursor={false}
+                    content={({ active, payload }) => {
+                      const point = payload?.[0]?.payload as
+                        | TemperatureCupPoint
+                        | undefined;
+
+                      if (!active || !point) {
+                        return null;
+                      }
+
+                      return (
+                        <div className="grid min-w-40 gap-2 rounded-lg border border-zinc-800/80 bg-zinc-950 px-3 py-2 text-xs shadow-xl">
+                          <p className="font-medium text-zinc-100">
+                            {point.dateLabel}
+                          </p>
+                          <div className="grid gap-1.5">
+                            <div className="flex items-center justify-between gap-5">
+                              <span className="flex items-center gap-2 text-zinc-400">
+                                <span className="size-2 rounded-full bg-cyan-300" />
+                                Kopper
+                              </span>
+                              <span className="font-mono font-medium tabular-nums text-zinc-100">
+                                {point.cups}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-5">
+                              <span className="flex items-center gap-2 text-zinc-400">
+                                <span className="size-2 rounded-full bg-teal-300" />
+                                Gns. temperatur
+                              </span>
+                              <span className="font-mono font-medium tabular-nums text-zinc-100">
+                                {TEMPERATURE_FORMATTER.format(
+                                  point.temperature,
+                                )}
+                                °
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }}
+                  />
+                  {temperatureTrend && (
+                    <ReferenceLine
+                      segment={temperatureTrend}
+                      stroke="var(--color-trend)"
+                      strokeWidth={3}
+                      strokeLinecap="round"
+                      ifOverflow="extendDomain"
+                    />
+                  )}
+                  <Scatter
+                    name="cups"
+                    data={temperatureCupPoints}
+                    fill="var(--color-cups)"
+                    fillOpacity={0.85}
+                  />
+                </ScatterChart>
+              </ChartContainer>
+            ) : (
+              <div className="flex h-64 items-center justify-center text-sm text-zinc-400">
+                Ikke nok vejrdata til at vise grafen endnu.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section
+        className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+        aria-label="Vejrrekorder"
+      >
+        {WEATHER_EXTREME_ORDER.map((kind) => {
+          const { label } = WEATHER_EXTREME_DETAILS[kind];
+          const extreme = weatherExtremes.find((row) => row.kind === kind);
+
+          return (
+            <Card
+              key={kind}
+              size="sm"
+              className="gap-2 border border-cyan-400/25 bg-zinc-950/80 ring-1 ring-cyan-400/35"
+            >
+              <CardHeader>
+                <CardTitle className="text-base! uppercase">{label}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {extreme ? (
+                  <>
+                    <p className="text-2xl font-semibold tabular-nums tracking-tight text-cyan-300">
+                      {formatWeatherExtremeValue(kind, extreme.value)}
+                    </p>
+                    <div className="space-y-0.5 text-xs text-zinc-500">
+                      <p className="truncate text-zinc-400">
+                        <span
+                          className="font-medium"
+                          style={{
+                            color: getPersonDisplayColor(
+                              extreme.person_name,
+                              extreme.person_id,
+                            ),
+                          }}
+                        >
+                          {extreme.person_name}
+                        </span>{" "}
+                        · {extreme.cup_name}
+                      </p>
+                      <p className="tabular-nums">
+                        {formatDateTime(extreme.consumed_at)}
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <p className="py-3 text-sm text-zinc-500">
+                    Ingen vejrdata endnu.
+                  </p>
+                )}
               </CardContent>
             </Card>
           );
@@ -473,8 +879,68 @@ function buildWeatherCategoryStats(
   });
 }
 
+function getLinearTrend(
+  points: TemperatureCupPoint[],
+): readonly [
+  { x: number; y: number },
+  { x: number; y: number },
+] | null {
+  if (points.length < 2) {
+    return null;
+  }
+
+  const meanTemperature =
+    points.reduce((sum, point) => sum + point.temperature, 0) / points.length;
+  const meanCups =
+    points.reduce((sum, point) => sum + point.cups, 0) / points.length;
+  const temperatureVariance = points.reduce(
+    (sum, point) => sum + (point.temperature - meanTemperature) ** 2,
+    0,
+  );
+
+  if (temperatureVariance === 0) {
+    return null;
+  }
+
+  const covariance = points.reduce(
+    (sum, point) =>
+      sum + (point.temperature - meanTemperature) * (point.cups - meanCups),
+    0,
+  );
+  const slope = covariance / temperatureVariance;
+  const intercept = meanCups - slope * meanTemperature;
+  const temperatures = points.map((point) => point.temperature);
+  const minimumTemperature = Math.min(...temperatures);
+  const maximumTemperature = Math.max(...temperatures);
+
+  return [
+    {
+      x: minimumTemperature,
+      y: Math.max(0, slope * minimumTemperature + intercept),
+    },
+    {
+      x: maximumTemperature,
+      y: Math.max(0, slope * maximumTemperature + intercept),
+    },
+  ];
+}
+
 function formatPercentage(value: number) {
   return `${Math.round(value)}%`;
+}
+
+function formatWeatherExtremeValue(kind: WeatherExtremeKind, value: number) {
+  const formattedValue = TEMPERATURE_FORMATTER.format(value);
+
+  if (kind === "coldest" || kind === "warmest") {
+    return `${formattedValue}°`;
+  }
+
+  if (kind === "wettest") {
+    return `${formattedValue} mm`;
+  }
+
+  return `${formattedValue} m/s`;
 }
 
 function formatTemperature(value: number | null) {
