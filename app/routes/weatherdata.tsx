@@ -122,15 +122,11 @@ export async function loader(
           WITH categories(category) AS (
             VALUES ('sunny'), ('cloudy'), ('rainy')
           ),
-          target_people AS (
+          all_people AS (
             SELECT
               p.id AS person_id,
               COALESCE(p.display_name, p.name) AS person_name
             FROM persons p
-            WHERE LOWER(TRIM(COALESCE(p.display_name, p.name))) IN (
-              'paven',
-              'burger lars'
-            )
           ),
           categorized AS (
             SELECT
@@ -165,27 +161,25 @@ export async function loader(
             categories.category,
             COALESCE(category_totals.cup_count, 0) AS cup_count,
             weather_total.cup_count AS weather_total,
-            target_people.person_id,
-            target_people.person_name,
+            all_people.person_id,
+            all_people.person_name,
             COALESCE(person_totals.cup_count, 0) AS person_cup_count
           FROM categories
-          CROSS JOIN target_people
+          CROSS JOIN all_people
           CROSS JOIN weather_total
           LEFT JOIN category_totals
             ON category_totals.category = categories.category
           LEFT JOIN person_totals
             ON person_totals.category = categories.category
-            AND person_totals.person_id = target_people.person_id
+            AND person_totals.person_id = all_people.person_id
           ORDER BY
             CASE categories.category
               WHEN 'sunny' THEN 1
               WHEN 'cloudy' THEN 2
               ELSE 3
             END,
-            CASE LOWER(target_people.person_name)
-              WHEN 'paven' THEN 1
-              ELSE 2
-            END
+            all_people.person_name COLLATE NOCASE ASC,
+            all_people.person_id ASC
         `,
       ).all<WeatherCategoryStatRow>(),
     ]);

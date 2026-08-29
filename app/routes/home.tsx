@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { Tooltip } from "@base-ui/react/tooltip";
 import { Check, ChevronDown, Info } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import type { Route } from "./+types/home";
@@ -662,6 +663,41 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export default function Home({ loaderData }: Route.ComponentProps) {
+  const filterBarRef = useRef<HTMLDivElement>(null);
+  const [filtersStuck, setFiltersStuck] = useState(false);
+
+  useEffect(() => {
+    let animationFrameId = 0;
+
+    const updateStuckState = () => {
+      window.cancelAnimationFrame(animationFrameId);
+      animationFrameId = window.requestAnimationFrame(() => {
+        const filterBar = filterBarRef.current;
+
+        if (!filterBar) {
+          return;
+        }
+
+        const nextFiltersStuck =
+          window.scrollY > 0 && filterBar.getBoundingClientRect().top <= 0.5;
+
+        setFiltersStuck((current) =>
+          current === nextFiltersStuck ? current : nextFiltersStuck,
+        );
+      });
+    };
+
+    updateStuckState();
+    window.addEventListener("scroll", updateStuckState, { passive: true });
+    window.addEventListener("resize", updateStuckState);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+      window.removeEventListener("scroll", updateStuckState);
+      window.removeEventListener("resize", updateStuckState);
+    };
+  }, []);
+
   const {
     people,
     cups,
@@ -940,7 +976,13 @@ export default function Home({ loaderData }: Route.ComponentProps) {
         </CardContent>
       </Card>
 
-      <div className="flex flex-col gap-4  py-4 lg:col-span-4 lg:flex-row lg:items-center lg:justify-between">
+      <div
+        ref={filterBarRef}
+        className={cn(
+          "sticky top-0 z-40 isolate flex flex-col gap-4 py-4 before:pointer-events-none before:absolute before:top-0 before:-bottom-20 before:left-1/2 before:-z-10 before:w-screen before:-translate-x-1/2 before:bg-linear-to-b before:from-zinc-950/85 before:from-0% before:via-zinc-950/45 before:via-45% before:to-transparent before:to-100% before:opacity-0 before:backdrop-blur-2xl before:[mask-image:linear-gradient(to_bottom,black_0%,black_20%,transparent_100%)] before:transition-opacity before:duration-200 before:content-[''] lg:col-span-4 lg:flex-row lg:items-center lg:justify-between",
+          filtersStuck && "before:opacity-100",
+        )}
+      >
         <div className="flex flex-wrap items-center gap-2">
           <span className="mr-1 text-xs font-medium uppercase text-zinc-500">
             Filter
