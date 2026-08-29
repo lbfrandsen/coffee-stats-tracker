@@ -84,6 +84,7 @@ type PersonRow = {
 type CupRow = {
   id: number;
   name: string;
+  owner_id: number;
   owner_name: string;
   total_uses: number;
 };
@@ -387,12 +388,13 @@ export async function loader({ request }: Route.LoaderArgs) {
             SELECT
               c.id,
               c.name,
+              c.owner_id,
               COALESCE(p.display_name, p.name) AS owner_name,
               COUNT(d.id) AS total_uses
             FROM cups c
             JOIN persons p ON p.id = c.owner_id
             LEFT JOIN drinks d ON d.cup_id = c.id
-            GROUP BY c.id, c.name, p.name, p.display_name
+            GROUP BY c.id, c.name, c.owner_id, p.name, p.display_name
             ORDER BY total_uses DESC, c.id ASC
           `,
         ).all<CupRow>(),
@@ -542,7 +544,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       cupDiversityScores: buildCupDiversityScores(
         cupUsageByPerson,
         selectedPeople,
-        cupsResult.results.length,
+        cupsResult.results,
       ),
       earlyBirds: buildEarlyBirds(eligibleAnalyticsDrinks, selectedPeople),
       nightOwls: buildNightOwls(eligibleAnalyticsDrinks, selectedPeople),
@@ -1456,7 +1458,8 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                       er drukket af hver kop, og normaliseres til en
                       procentværdi 0-100%. 0% betyder, at den samme kop er brugt
                       altid, mens 100% betyder, at kopperne er fordelt helt
-                      jævnt.
+                      jævnt. Scoren normaliseres ud fra antallet af kopper, som
+                      personen selv ejer.
                       <br />
                       <br />
                       Variansen er udregnet ud fra{" "}
@@ -1468,7 +1471,8 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                       >
                         Shannons entropi
                       </a>{" "}
-                      som måler, hvor jævnt forbruget er fordelt.
+                      som måler, hvor jævnt forbruget er fordelt. Medregnet er
+                      kun de kopper, man selv ejer.
                     </Tooltip.Popup>
                   </Tooltip.Positioner>
                 </Tooltip.Portal>
@@ -2910,13 +2914,23 @@ function buildLoyalists(
 function buildCupDiversityScores(
   usageByPerson: CupUsageByPerson,
   people: PersonRow[],
-  registeredCupCount: number,
+  cups: CupRow[],
 ): CupDiversityScore[] {
+  const registeredCupCountsByOwner = new Map<number, number>();
+
+  for (const cup of cups) {
+    registeredCupCountsByOwner.set(
+      cup.owner_id,
+      (registeredCupCountsByOwner.get(cup.owner_id) ?? 0) + 1,
+    );
+  }
+
   return people
     .map((person) => {
       const usage = usageByPerson.get(person.id);
       const totalDrinkCount = usage?.totalDrinkCount ?? 0;
       const distinctCupCount = usage?.cups.size ?? 0;
+      const registeredCupCount = registeredCupCountsByOwner.get(person.id) ?? 0;
       let score: number | null = null;
 
       if (totalDrinkCount >= 2) {
