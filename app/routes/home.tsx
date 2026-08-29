@@ -1582,8 +1582,8 @@ export default function Home({ loaderData }: Route.ComponentProps) {
               <p className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 text-center text-xs text-zinc-500">
                 {bestFriendStats[0].matchedDrinkCount}{" "}
                 {bestFriendStats[0].matchedDrinkCount === 1
-                  ? "match"
-                  : "matches"}
+                  ? "kaffedate"
+                  : "kaffedates ♥️"}
               </p>
             )}
           </CardContent>
