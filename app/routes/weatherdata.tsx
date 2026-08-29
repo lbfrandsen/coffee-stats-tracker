@@ -29,9 +29,9 @@ type WeatherCategoryStatRow = {
   category: WeatherCategory;
   cup_count: number;
   weather_total: number;
-  person_id: number;
-  person_name: string;
-  person_cup_count: number;
+  person_id: number | null;
+  person_name: string | null;
+  person_cup_count: number | null;
 };
 
 type WeatherCategoryStat = {
@@ -122,12 +122,6 @@ export async function loader(
           WITH categories(category) AS (
             VALUES ('sunny'), ('cloudy'), ('rainy')
           ),
-          all_people AS (
-            SELECT
-              p.id AS person_id,
-              COALESCE(p.display_name, p.name) AS person_name
-            FROM persons p
-          ),
           categorized AS (
             SELECT
               d.id AS drink_id,
@@ -148,10 +142,16 @@ export async function loader(
           person_totals AS (
             SELECT
               categorized.category,
-              categorized.person_id,
+              p.id AS person_id,
+              COALESCE(p.display_name, p.name) AS person_name,
               COUNT(*) AS cup_count
             FROM categorized
-            GROUP BY categorized.category, categorized.person_id
+            JOIN persons p ON p.id = categorized.person_id
+            GROUP BY
+              categorized.category,
+              p.id,
+              p.display_name,
+              p.name
           ),
           weather_total AS (
             SELECT COUNT(*) AS cup_count
@@ -161,25 +161,23 @@ export async function loader(
             categories.category,
             COALESCE(category_totals.cup_count, 0) AS cup_count,
             weather_total.cup_count AS weather_total,
-            all_people.person_id,
-            all_people.person_name,
-            COALESCE(person_totals.cup_count, 0) AS person_cup_count
+            person_totals.person_id,
+            person_totals.person_name,
+            person_totals.cup_count AS person_cup_count
           FROM categories
-          CROSS JOIN all_people
           CROSS JOIN weather_total
           LEFT JOIN category_totals
             ON category_totals.category = categories.category
           LEFT JOIN person_totals
             ON person_totals.category = categories.category
-            AND person_totals.person_id = all_people.person_id
           ORDER BY
             CASE categories.category
               WHEN 'sunny' THEN 1
               WHEN 'cloudy' THEN 2
               ELSE 3
             END,
-            all_people.person_name COLLATE NOCASE ASC,
-            all_people.person_id ASC
+            person_totals.person_name COLLATE NOCASE ASC,
+            person_totals.person_id ASC
         `,
       ).all<WeatherCategoryStatRow>(),
     ]);
@@ -370,7 +368,7 @@ export default function WeatherData() {
                   ))}
                   {stat.people.length === 0 && (
                     <p className="mt-1 text-sm text-zinc-500">
-                      Personerne blev ikke fundet.
+                      Ingen kopper registreret.
                     </p>
                   )}
                 </div>
@@ -457,11 +455,20 @@ function buildWeatherCategoryStats(
       category,
       cupCount,
       percentage: weatherTotal > 0 ? (cupCount / weatherTotal) * 100 : 0,
-      people: categoryRows.map((personRow) => ({
-        personId: personRow.person_id,
-        personName: personRow.person_name,
-        cupCount: personRow.person_cup_count,
-      })),
+      people: categoryRows.flatMap((personRow) =>
+        personRow.person_id !== null &&
+        personRow.person_name !== null &&
+        personRow.person_cup_count !== null &&
+        personRow.person_cup_count > 0
+          ? [
+              {
+                personId: personRow.person_id,
+                personName: personRow.person_name,
+                cupCount: personRow.person_cup_count,
+              },
+            ]
+          : [],
+      ),
     };
   });
 }
