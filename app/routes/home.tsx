@@ -298,6 +298,18 @@ type MonthlyEconomyOverview = {
   percentageChange: number | null;
 };
 
+type LifetimeEconomyComparison = {
+  key: string;
+  productName: string;
+  imageUrl: string;
+  quantity: number;
+};
+
+type LifetimeEconomy = {
+  totalSpend: number;
+  comparisons: LifetimeEconomyComparison[];
+};
+
 type EligibleAnalyticsDrink = {
   drink: AnalyticsDrinkRow;
   consumedAt: Date;
@@ -328,6 +340,41 @@ const ANALYTICS_RANGES: Array<{ value: AnalyticsRange; label: string }> = [
   { value: "month", label: "This month" },
   { value: "all", label: "All time" },
 ];
+
+// These make sense later, I swear
+const AIR_PODS_PRICE = 1700;
+const RAINBOW_COOKIES_PRICE = 17;
+const MONSTER_PRICE = 15;
+const SUSHI_PRICE = 269;
+const LIFETIME_ECONOMY_PRODUCTS = [
+  {
+    key: "airpods-pro-3",
+    productName: "AirPods Pro 3",
+    price: AIR_PODS_PRICE,
+    imageUrl:
+      "https://assets.kaffe.lucasfrandsen.dk/economy-pics/airpodspro3side2.webp",
+  },
+  {
+    key: "rainbow-cookies",
+    productName: "Rainbow Cookies",
+    price: RAINBOW_COOKIES_PRICE,
+    imageUrl:
+      "https://assets.kaffe.lucasfrandsen.dk/economy-pics/rainbow-cookies.webp",
+  },
+  {
+    key: "monster",
+    productName: "Monnere",
+    price: MONSTER_PRICE,
+    imageUrl:
+      "https://assets.kaffe.lucasfrandsen.dk/economy-pics/monster-can.webp",
+  },
+  {
+    key: "sushi",
+    productName: "gange Sushi Ad Libitum",
+    price: SUSHI_PRICE,
+    imageUrl: "https://assets.kaffe.lucasfrandsen.dk/economy-pics/nigiri.webp",
+  },
+] as const;
 
 const leaderboardChartConfig = {
   cups: {
@@ -564,6 +611,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         monthlyEconomyDrinks,
         analyticsNow,
       ),
+      lifetimeEconomy: buildLifetimeEconomy(totalDrinks),
       drinksPagination: {
         page: currentDrinksPage,
         pageSize: DRINKS_PAGE_SIZE,
@@ -601,6 +649,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         analyticsNow,
       ),
       monthlyEconomyOverview: buildMonthlyEconomyOverview([], analyticsNow),
+      lifetimeEconomy: buildLifetimeEconomy(0),
       drinksPagination: {
         page: 1,
         pageSize: DRINKS_PAGE_SIZE,
@@ -631,6 +680,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     allTimeRecords,
     economyAnalytics,
     monthlyEconomyOverview,
+    lifetimeEconomy,
     drinksPagination,
   } = loaderData;
   const paginationPages = getVisiblePages(
@@ -2225,6 +2275,48 @@ export default function Home({ loaderData }: Route.ComponentProps) {
         </div>
       </section>
 
+      <section className="mt-4 lg:col-span-4" aria-label="Lifetime economy">
+        <Card className="border-zinc-800 bg-zinc-950/80 ring-0">
+          <CardHeader className="">
+            <CardTitle className="uppercase">
+              For de{" "}
+              <span className="text-green-500">
+                {formatCurrency(lifetimeEconomy.totalSpend)}
+              </span>{" "}
+              vi har brugt på kaffe, kunne vi have købt…
+            </CardTitle>
+            <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
+              All time
+            </CardAction>
+          </CardHeader>
+
+          <CardContent>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {lifetimeEconomy.comparisons.map((comparison) => (
+                <Card
+                  key={comparison.key}
+                  className="border-zinc-800 bg-transparent ring-0"
+                >
+                  <CardContent className="flex items-center gap-4">
+                    <img
+                      src={comparison.imageUrl}
+                      alt={comparison.productName}
+                      className="h-32 w-32 shrink-0 object-contain lg:h-44 lg:w-44"
+                    />
+                    <p className="min-w-0 text-lg font-semibold">
+                      <span className="tabular-nums text-orange-400">
+                        {formatProductQuantity(comparison.quantity)}
+                      </span>{" "}
+                      {comparison.productName}
+                    </p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
       <Card className="border-zinc-800 bg-zinc-950/80 lg:col-span-4 mt-30">
         <CardHeader className="border-b border-zinc-800">
           <CardTitle>All Drinks</CardTitle>
@@ -3509,8 +3601,29 @@ function getEconomyElapsedDayCount(
   return Math.max(1, Math.min(periodDayCount, elapsedDayCount));
 }
 
+function buildLifetimeEconomy(totalDrinkCount: number): LifetimeEconomy {
+  const totalSpend = roundCurrency(totalDrinkCount * COST_PER_DRINK);
+
+  return {
+    totalSpend,
+    comparisons: LIFETIME_ECONOMY_PRODUCTS.map((product) => ({
+      key: product.key,
+      productName: product.productName,
+      imageUrl: product.imageUrl,
+      quantity: totalSpend / product.price,
+    })),
+  };
+}
+
 function roundCurrency(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function formatProductQuantity(quantity: number) {
+  return quantity.toLocaleString("da-DK", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 function formatHourSlot(hour: number) {
