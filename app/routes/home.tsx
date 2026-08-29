@@ -122,6 +122,29 @@ type AnalyticsDrinkRow = {
   cup_name: string;
 };
 
+type AllTimeRecordDrinkRow = Pick<
+  AnalyticsDrinkRow,
+  "id" | "consumed_at" | "person_id" | "person_name"
+>;
+
+type AllTimeRecords = {
+  mostCupsInDay: {
+    personId: number;
+    personName: string;
+    drinkCount: number;
+    dateConsumedAt: string;
+  } | null;
+  earliestCup: {
+    personId: number;
+    personName: string;
+    consumedAt: string;
+  } | null;
+  mostCupsInHouseholdDay: {
+    drinkCount: number;
+    dateConsumedAt: string;
+  } | null;
+};
+
 type AnalyticsChartBucket = {
   bucket: string;
   [personDataKey: string]: string | number;
@@ -173,6 +196,30 @@ type Loyalist = {
   cupName: string | null;
 };
 
+type CupUsageByPerson = Map<
+  number,
+  {
+    totalDrinkCount: number;
+    cups: Map<
+      number,
+      {
+        cupName: string;
+        cupCount: number;
+        lastConsumedAtMs: number;
+      }
+    >;
+  }
+>;
+
+type CupDiversityScore = {
+  personId: number;
+  personName: string;
+  score: number | null;
+  distinctCupCount: number;
+  totalDrinkCount: number;
+  registeredCupCount: number;
+};
+
 type EarlyBird = {
   personId: number;
   personName: string;
@@ -183,6 +230,21 @@ type NightOwl = {
   personId: number;
   personName: string;
   consumedAt: string | null;
+};
+
+type Primetime = {
+  personId: number;
+  personName: string;
+  hour: number | null;
+  drinkCount: number;
+};
+
+type BestFriendStat = {
+  personId: number;
+  personName: string;
+  matchedDrinkCount: number;
+  totalDrinkCount: number;
+  percentage: number | null;
 };
 
 type EconomyChartBucket = {
@@ -258,6 +320,7 @@ const COST_PER_DRINK = 1.38; // Rough average
 const PRICE_OF_DRINK_IN_CPH = 40;
 const CHART_NAMES = new Set(["paven", "burger lars"]); // Not everyone should be included in the chart
 const DEFAULT_ANALYTICS_NAMES = new Set(["paven", "burger lars"]);
+const BEST_FRIEND_NAMES = ["paven", "burger lars"] as const;
 const ANALYTICS_RANGES: Array<{ value: AnalyticsRange; label: string }> = [
   { value: "today", label: "Today" },
   { value: "week", label: "This week" },
@@ -305,35 +368,50 @@ export async function loader({ request }: Route.LoaderArgs) {
       : 1;
 
   try {
-    const [peopleResult, cupsResult, drinksCount] = await Promise.all([
-      env.DB.prepare(
-        `
-          SELECT p.id, p.name, p.display_name
-          FROM persons p
-          WHERE EXISTS (
-            SELECT 1
+    const [peopleResult, cupsResult, drinksCount, allTimeRecordDrinksResult] =
+      await Promise.all([
+        env.DB.prepare(
+          `
+            SELECT p.id, p.name, p.display_name
+            FROM persons p
+            WHERE EXISTS (
+              SELECT 1
+              FROM cups c
+              WHERE c.owner_id = p.id
+            )
+            ORDER BY p.name COLLATE NOCASE ASC
+          `,
+        ).all<PersonRow>(),
+        env.DB.prepare(
+          `
+            SELECT
+              c.id,
+              c.name,
+              COALESCE(p.display_name, p.name) AS owner_name,
+              COUNT(d.id) AS total_uses
             FROM cups c
-            WHERE c.owner_id = p.id
-          )
-          ORDER BY p.name COLLATE NOCASE ASC
-        `,
-      ).all<PersonRow>(),
-      env.DB.prepare(
-        `
-          SELECT
-            c.id,
-            c.name,
-            COALESCE(p.display_name, p.name) AS owner_name,
-            COUNT(d.id) AS total_uses
-          FROM cups c
-          JOIN persons p ON p.id = c.owner_id
-          LEFT JOIN drinks d ON d.cup_id = c.id
-          GROUP BY c.id, c.name, p.name, p.display_name
-          ORDER BY total_uses DESC, c.id ASC
-        `,
-      ).all<CupRow>(),
-      env.DB.prepare("SELECT COUNT(*) AS total FROM drinks").first<CountRow>(),
-    ]);
+            JOIN persons p ON p.id = c.owner_id
+            LEFT JOIN drinks d ON d.cup_id = c.id
+            GROUP BY c.id, c.name, p.name, p.display_name
+            ORDER BY total_uses DESC, c.id ASC
+          `,
+        ).all<CupRow>(),
+        env.DB.prepare(
+          "SELECT COUNT(*) AS total FROM drinks",
+        ).first<CountRow>(),
+        env.DB.prepare(
+          `
+            SELECT
+              d.id,
+              d.consumed_at,
+              p.id AS person_id,
+              COALESCE(p.display_name, p.name) AS person_name
+            FROM drinks d
+            JOIN persons p ON p.id = d.person_id
+            ORDER BY d.consumed_at ASC, d.id ASC
+          `,
+        ).all<AllTimeRecordDrinkRow>(),
+      ]);
 
     const people = peopleResult.results;
     const validPersonIds = new Set(people.map((person) => person.id));
@@ -358,18 +436,32 @@ export async function loader({ request }: Route.LoaderArgs) {
       ),
     ];
 
-    const [analyticsDrinks, monthlyEconomyDrinks] =
-      selectedPersonIds.length > 0
-        ? await Promise.all([
-            loadAnalyticsDrinks(selectedPersonIds, analyticsPeriod).then(
+    const bestFriendPeople = BEST_FRIEND_NAMES.map((name) =>
+      people.find(
+        (person) =>
+          (person.display_name ?? person.name).trim().toLowerCase() === name,
+      ),
+    ).filter((person): person is PersonRow => person !== undefined);
+    const bestFriendPersonIds = bestFriendPeople.map((person) => person.id);
+    const [analyticsDrinks, monthlyEconomyDrinks, bestFriendDrinks] =
+      await Promise.all([
+        selectedPersonIds.length > 0
+          ? loadAnalyticsDrinks(selectedPersonIds, analyticsPeriod).then(
               (result) => result.results,
-            ),
-            loadAnalyticsDrinks(
+            )
+          : Promise.resolve<AnalyticsDrinkRow[]>([]),
+        selectedPersonIds.length > 0
+          ? loadAnalyticsDrinks(
               selectedPersonIds,
               monthlyEconomyQueryPeriod,
-            ).then((result) => result.results),
-          ])
-        : [[], []];
+            ).then((result) => result.results)
+          : Promise.resolve<AnalyticsDrinkRow[]>([]),
+        bestFriendPersonIds.length === 2
+          ? loadAnalyticsDrinks(bestFriendPersonIds, analyticsPeriod).then(
+              (result) => result.results,
+            )
+          : Promise.resolve<AnalyticsDrinkRow[]>([]),
+      ]);
     const selectedPeople = people.filter((person) =>
       selectedPersonIds.includes(person.id),
     );
@@ -377,6 +469,11 @@ export async function loader({ request }: Route.LoaderArgs) {
       analyticsDrinks,
       analyticsPeriod,
     );
+    const eligibleBestFriendDrinks = getEligibleAnalyticsDrinks(
+      bestFriendDrinks,
+      analyticsPeriod,
+    );
+    const cupUsageByPerson = buildCupUsageByPerson(eligibleAnalyticsDrinks);
 
     const totalDrinks = drinksCount?.total ?? 0;
     const totalPages = Math.max(1, Math.ceil(totalDrinks / DRINKS_PAGE_SIZE));
@@ -441,9 +538,20 @@ export async function loader({ request }: Route.LoaderArgs) {
         selectedPeople,
       ),
       rapidFires: buildRapidFires(eligibleAnalyticsDrinks, selectedPeople),
-      loyalists: buildLoyalists(eligibleAnalyticsDrinks, selectedPeople),
+      loyalists: buildLoyalists(cupUsageByPerson, selectedPeople),
+      cupDiversityScores: buildCupDiversityScores(
+        cupUsageByPerson,
+        selectedPeople,
+        cupsResult.results.length,
+      ),
       earlyBirds: buildEarlyBirds(eligibleAnalyticsDrinks, selectedPeople),
       nightOwls: buildNightOwls(eligibleAnalyticsDrinks, selectedPeople),
+      primetimes: buildPrimetimes(eligibleAnalyticsDrinks, selectedPeople),
+      bestFriendStats: buildBestFriendStats(
+        eligibleBestFriendDrinks,
+        bestFriendPeople,
+      ),
+      allTimeRecords: buildAllTimeRecords(allTimeRecordDrinksResult.results),
       economyAnalytics: buildEconomyAnalytics(
         eligibleAnalyticsDrinks,
         selectedPeople,
@@ -478,8 +586,12 @@ export async function loader({ request }: Route.LoaderArgs) {
       typicalCooldowns: [],
       rapidFires: [],
       loyalists: [],
+      cupDiversityScores: [],
       earlyBirds: [],
       nightOwls: [],
+      primetimes: [],
+      bestFriendStats: [],
+      allTimeRecords: buildAllTimeRecords([]),
       economyAnalytics: buildEconomyAnalytics(
         [],
         [],
@@ -509,8 +621,12 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     typicalCooldowns,
     rapidFires,
     loyalists,
+    cupDiversityScores,
     earlyBirds,
     nightOwls,
+    primetimes,
+    bestFriendStats,
+    allTimeRecords,
     economyAnalytics,
     monthlyEconomyOverview,
     drinksPagination,
@@ -1278,6 +1394,200 @@ export default function Home({ loaderData }: Route.ComponentProps) {
             ))}
           </CardContent>
         </Card>
+
+        <Card className="border-zinc-800 bg-zinc-950/80">
+          <CardHeader className="border-b border-zinc-800">
+            <CardTitle className="uppercase">Primetime</CardTitle>
+            <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
+              {analyticsChart.subtitle}
+            </CardAction>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {primetimes.map((primetime) => (
+              <div key={primetime.personId}>
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="font-medium">{primetime.personName}</span>
+                  <span
+                    className="shrink-0 font-medium tabular-nums text-zinc-300"
+                    style={
+                      primetime.hour === null
+                        ? undefined
+                        : {
+                            color: getPersonDisplayColor(
+                              primetime.personName,
+                              primetime.personId,
+                            ),
+                          }
+                    }
+                  >
+                    {primetime.hour === null
+                      ? "—"
+                      : formatHourSlot(primetime.hour)}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {primetime.hour === null
+                    ? "No drinks in this period."
+                    : `${primetime.drinkCount} ${primetime.drinkCount === 1 ? "drink" : "drinks"}`}
+                </p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card className="border-zinc-800 bg-zinc-950/80">
+          <CardHeader className="border-b border-zinc-800">
+            <CardTitle className="flex items-center gap-1.5 uppercase">
+              STØRST VARIANS
+              <Tooltip.Root>
+                <Tooltip.Trigger
+                  type="button"
+                  delay={150}
+                  aria-label="What does variance mean?"
+                  className="inline-flex size-5 cursor-pointer items-center justify-center rounded-full text-zinc-500 transition-colors hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+                >
+                  <Info className="size-3.5" aria-hidden="true" />
+                </Tooltip.Trigger>
+                <Tooltip.Portal>
+                  <Tooltip.Positioner sideOffset={8}>
+                    <Tooltip.Popup className="z-50 max-w-64 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs leading-5 font-normal tracking-normal text-zinc-200 normal-case shadow-lg transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0">
+                      Variansen fortæller hvor varieret brugen af kopper er.
+                      Scoren beregnes ud fra, hvor stor en andel af drinks der
+                      er drukket af hver kop, og normaliseres til en
+                      procentværdi 0-100%. 0% betyder, at den samme kop er brugt
+                      altid, mens 100% betyder, at kopperne er fordelt helt
+                      jævnt.
+                      <br />
+                      <br />
+                      Variansen er udregnet ud fra{" "}
+                      <a
+                        href="https://en.wikipedia.org/wiki/Entropy_(information_theory)"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-zinc-100 underline underline-offset-2 hover:text-white"
+                      >
+                        Shannons entropi
+                      </a>{" "}
+                      som måler, hvor jævnt forbruget er fordelt.
+                    </Tooltip.Popup>
+                  </Tooltip.Positioner>
+                </Tooltip.Portal>
+              </Tooltip.Root>
+            </CardTitle>
+            <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
+              {analyticsChart.subtitle}
+            </CardAction>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {cupDiversityScores.map((diversity) => (
+              <div key={diversity.personId}>
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="font-medium">{diversity.personName}</span>
+                  <span
+                    className="shrink-0 font-medium tabular-nums text-zinc-300"
+                    style={
+                      diversity.score === null
+                        ? undefined
+                        : {
+                            color: getPersonDisplayColor(
+                              diversity.personName,
+                              diversity.personId,
+                            ),
+                          }
+                    }
+                  >
+                    {diversity.score === null
+                      ? "—"
+                      : formatPercentage(diversity.score)}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {diversity.score === null
+                    ? `Kræver mindst 2 drinks · ${diversity.totalDrinkCount} registreret`
+                    : `${diversity.distinctCupCount} af ${diversity.registeredCupCount} kopper brugt i perioden`}
+                </p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card className="border-zinc-800 bg-zinc-950/80">
+          <CardHeader className="border-b border-zinc-800">
+            <CardTitle className="flex items-center gap-1.5  uppercase">
+              Bedste venner
+              <Tooltip.Root>
+                <Tooltip.Trigger
+                  type="button"
+                  delay={150}
+                  aria-label="What does variance mean?"
+                  className="inline-flex size-5 cursor-pointer items-center justify-center rounded-full text-zinc-500 transition-colors hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+                >
+                  <Info className="size-3.5" aria-hidden="true" />
+                </Tooltip.Trigger>
+                <Tooltip.Portal>
+                  <Tooltip.Positioner sideOffset={8}>
+                    <Tooltip.Popup className="z-50 max-w-64 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs leading-5 font-normal tracking-normal text-zinc-200 normal-case shadow-lg transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0">
+                      Bedste venner drikker deres kaffe sammen - for uden en
+                      bedste ven til at drikke sin kaffe med, bliver det
+                      pludselig udelukkende en koffeinafhængighed fremfor et
+                      socialt samlingspunkt ♥️
+                      <br />
+                      <br />
+                      Dette kort viser dermed hvor stor en andel af vores
+                      kopper, som er drukket sammen - specifikt inden for 60
+                      sekunder af hinanden. Statistikken er stricly pair-wise,
+                      hvilket betyder, at den kun tæller Paven og Burger Lars'
+                      kopper, og ingen andre. Den respekterer dermed
+                      periodefiltre, men ikke personfiltre - og det er ikke
+                      fordi man ikke kan have flere bedste venner, det er
+                      simpelthen primært fordi jeg ikke er dygtig nok til at
+                      gennemskue hvordan man gør det på en smart måde med over
+                      to personer.
+                    </Tooltip.Popup>
+                  </Tooltip.Positioner>
+                </Tooltip.Portal>
+              </Tooltip.Root>
+            </CardTitle>
+            <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
+              {analyticsChart.subtitle}
+            </CardAction>
+          </CardHeader>
+          <CardContent className="relative">
+            <div className="space-y-5">
+              {bestFriendStats.map((friend) => {
+                const color = getPersonDisplayColor(
+                  friend.personName,
+                  friend.personId,
+                );
+
+                return (
+                  <div
+                    key={friend.personId}
+                    className="flex items-baseline justify-between gap-3"
+                  >
+                    <span className="font-medium">{friend.personName}</span>
+                    <span
+                      className="shrink-0 font-medium tabular-nums text-zinc-300"
+                      style={friend.percentage === null ? undefined : { color }}
+                    >
+                      {friend.percentage === null
+                        ? "—"
+                        : formatPercentage(friend.percentage)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            {bestFriendStats.length === 2 && (
+              <p className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 text-center text-xs text-zinc-500">
+                {bestFriendStats[0].matchedDrinkCount}{" "}
+                {bestFriendStats[0].matchedDrinkCount === 1
+                  ? "match"
+                  : "matches"}
+              </p>
+            )}
+          </CardContent>
+        </Card>
       </section>
 
       <Card className="ring-0 border-zinc-800 bg-zinc-950/80 lg:col-span-4">
@@ -1349,6 +1659,126 @@ export default function Home({ loaderData }: Route.ComponentProps) {
           )}
         </CardContent>
       </Card>
+
+      <section className="mt-4 lg:col-span-4" aria-label="All time records">
+        <Card className="flex min-h-64 bg-zinc-950/80 flex-col ring-[#d4af37]">
+          <CardHeader className="border-zinc-800">
+            <CardTitle className="text-center text-2xl uppercase">
+              🏆 All time records 🏆
+            </CardTitle>
+          </CardHeader>
+
+          <CardContent className="flex flex-1 items-center justify-center">
+            <div className="grid w-full grid-cols-3 gap-6 text-center">
+              <div>
+                <h3 className="text-sm font-semibold uppercase text-zinc-400">
+                  Kopper på én dag
+                </h3>
+
+                <p
+                  className="mt-3 text-2xl font-semibold tabular-nums"
+                  style={
+                    allTimeRecords.mostCupsInDay
+                      ? {
+                          color: getPersonDisplayColor(
+                            allTimeRecords.mostCupsInDay.personName,
+                            allTimeRecords.mostCupsInDay.personId,
+                          ),
+                        }
+                      : undefined
+                  }
+                >
+                  {allTimeRecords.mostCupsInDay
+                    ? `${allTimeRecords.mostCupsInDay.drinkCount} ${
+                        allTimeRecords.mostCupsInDay.drinkCount === 1
+                          ? "kop"
+                          : "kopper"
+                      }`
+                    : "—"}
+                </p>
+
+                <p className="mt-1 text-sm font-medium">
+                  {allTimeRecords.mostCupsInDay?.personName ??
+                    "Ingen registrerede kopper"}
+                </p>
+
+                <p className="mt-1 text-xs text-zinc-500">
+                  {allTimeRecords.mostCupsInDay
+                    ? formatAnalyticsDate(
+                        allTimeRecords.mostCupsInDay.dateConsumedAt,
+                      )
+                    : "—"}
+                </p>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-semibold uppercase text-zinc-400">
+                  Fællesdrikning
+                </h3>
+
+                <p className="mt-3 text-2xl font-semibold tabular-nums text-[#d4af37]">
+                  {allTimeRecords.mostCupsInHouseholdDay
+                    ? `${allTimeRecords.mostCupsInHouseholdDay.drinkCount} ${
+                        allTimeRecords.mostCupsInHouseholdDay.drinkCount === 1
+                          ? "kop"
+                          : "kopper"
+                      }`
+                    : "—"}
+                </p>
+
+                <p className="mt-1 text-sm font-medium">
+                  {allTimeRecords.mostCupsInHouseholdDay
+                    ? "Hele husstanden"
+                    : "Ingen registrerede kopper"}
+                </p>
+
+                <p className="mt-1 text-xs text-zinc-500">
+                  {allTimeRecords.mostCupsInHouseholdDay
+                    ? formatAnalyticsDate(
+                        allTimeRecords.mostCupsInHouseholdDay.dateConsumedAt,
+                      )
+                    : "—"}
+                </p>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-semibold uppercase text-zinc-400">
+                  Tidligste kop
+                </h3>
+
+                <p
+                  className="mt-3 text-2xl font-semibold tabular-nums"
+                  style={
+                    allTimeRecords.earliestCup
+                      ? {
+                          color: getPersonDisplayColor(
+                            allTimeRecords.earliestCup.personName,
+                            allTimeRecords.earliestCup.personId,
+                          ),
+                        }
+                      : undefined
+                  }
+                >
+                  {allTimeRecords.earliestCup
+                    ? formatTime(allTimeRecords.earliestCup.consumedAt)
+                    : "—"}
+                </p>
+
+                <p className="mt-1 text-sm font-medium">
+                  {allTimeRecords.earliestCup?.personName ??
+                    "Ingen registrerede kopper"}
+                </p>
+
+                <p className="mt-1 text-xs text-zinc-500">
+                  {allTimeRecords.earliestCup
+                    ? formatAnalyticsDate(allTimeRecords.earliestCup.consumedAt)
+                    : "—"}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
 
       <section className="space-y-4 lg:col-span-4" aria-label="Økonomi">
         <Card className="ring-0 border-zinc-800 bg-zinc-950/80">
@@ -2421,47 +2851,42 @@ function buildRapidFires(
     });
 }
 
-function buildLoyalists(
+function buildCupUsageByPerson(
   eligibleDrinks: EligibleAnalyticsDrink[],
-  people: PersonRow[],
-): Loyalist[] {
-  const totalByPerson = new Map<number, number>();
-  const cupsByPerson = new Map<
-    number,
-    Map<
-      number,
-      {
-        cupName: string;
-        cupCount: number;
-        lastConsumedAtMs: number;
-      }
-    >
-  >();
+): CupUsageByPerson {
+  const usageByPerson: CupUsageByPerson = new Map();
 
   for (const { drink, consumedAt } of eligibleDrinks) {
-    totalByPerson.set(
-      drink.person_id,
-      (totalByPerson.get(drink.person_id) ?? 0) + 1,
-    );
-
-    const cups = cupsByPerson.get(drink.person_id) ?? new Map();
-    const cup = cups.get(drink.cup_id) ?? {
+    const usage = usageByPerson.get(drink.person_id) ?? {
+      totalDrinkCount: 0,
+      cups: new Map(),
+    };
+    const cup = usage.cups.get(drink.cup_id) ?? {
       cupName: drink.cup_name,
       cupCount: 0,
       lastConsumedAtMs: 0,
     };
 
+    usage.totalDrinkCount += 1;
     cup.cupCount += 1;
     cup.lastConsumedAtMs = Math.max(cup.lastConsumedAtMs, consumedAt.getTime());
-    cups.set(drink.cup_id, cup);
-    cupsByPerson.set(drink.person_id, cups);
+    usage.cups.set(drink.cup_id, cup);
+    usageByPerson.set(drink.person_id, usage);
   }
 
+  return usageByPerson;
+}
+
+function buildLoyalists(
+  usageByPerson: CupUsageByPerson,
+  people: PersonRow[],
+): Loyalist[] {
   return [...people]
     .sort((a, b) => a.id - b.id)
     .map((person) => {
-      const totalCupCount = totalByPerson.get(person.id) ?? 0;
-      const favorite = [...(cupsByPerson.get(person.id)?.values() ?? [])].sort(
+      const usage = usageByPerson.get(person.id);
+      const totalCupCount = usage?.totalDrinkCount ?? 0;
+      const favorite = [...(usage?.cups.values() ?? [])].sort(
         (a, b) =>
           b.cupCount - a.cupCount ||
           b.lastConsumedAtMs - a.lastConsumedAtMs ||
@@ -2480,6 +2905,53 @@ function buildLoyalists(
         cupName: favorite?.cupName ?? null,
       };
     });
+}
+
+function buildCupDiversityScores(
+  usageByPerson: CupUsageByPerson,
+  people: PersonRow[],
+  registeredCupCount: number,
+): CupDiversityScore[] {
+  return people
+    .map((person) => {
+      const usage = usageByPerson.get(person.id);
+      const totalDrinkCount = usage?.totalDrinkCount ?? 0;
+      const distinctCupCount = usage?.cups.size ?? 0;
+      let score: number | null = null;
+
+      if (totalDrinkCount >= 2) {
+        if (registeredCupCount <= 1) {
+          score = 0;
+        } else {
+          const entropy = [...(usage?.cups.values() ?? [])].reduce(
+            (total, cup) => {
+              const probability = cup.cupCount / totalDrinkCount;
+
+              return total - probability * Math.log(probability);
+            },
+            0,
+          );
+
+          score = Math.min(100, (entropy / Math.log(registeredCupCount)) * 100);
+        }
+      }
+
+      return {
+        personId: person.id,
+        personName: person.display_name ?? person.name,
+        score,
+        distinctCupCount,
+        totalDrinkCount,
+        registeredCupCount,
+      };
+    })
+    .sort(
+      (a, b) =>
+        (b.score ?? -1) - (a.score ?? -1) ||
+        b.distinctCupCount - a.distinctCupCount ||
+        b.totalDrinkCount - a.totalDrinkCount ||
+        a.personName.localeCompare(b.personName),
+    );
 }
 
 function buildEarlyBirds(
@@ -2546,6 +3018,226 @@ function buildNightOwls(
       personName: person.display_name ?? person.name,
       consumedAt: latestByPerson.get(person.id)?.consumedAt ?? null,
     }));
+}
+
+function buildPrimetimes(
+  eligibleDrinks: EligibleAnalyticsDrink[],
+  people: PersonRow[],
+): Primetime[] {
+  const countsByPersonAndHour = new Map<number, number[]>();
+
+  for (const { drink, consumedAt } of eligibleDrinks) {
+    const hour = getCopenhagenDateParts(consumedAt).hour;
+    const hourlyCounts =
+      countsByPersonAndHour.get(drink.person_id) ?? Array(24).fill(0);
+
+    hourlyCounts[hour] += 1;
+    countsByPersonAndHour.set(drink.person_id, hourlyCounts);
+  }
+
+  return [...people]
+    .sort((a, b) => a.id - b.id)
+    .map((person) => {
+      const hourlyCounts = countsByPersonAndHour.get(person.id);
+      let hour: number | null = null;
+      let drinkCount = 0;
+
+      if (hourlyCounts) {
+        for (let candidateHour = 0; candidateHour < 24; candidateHour += 1) {
+          const candidateCount = hourlyCounts[candidateHour];
+
+          if (candidateCount > drinkCount) {
+            hour = candidateHour;
+            drinkCount = candidateCount;
+          }
+        }
+      }
+
+      return {
+        personId: person.id,
+        personName: person.display_name ?? person.name,
+        hour,
+        drinkCount,
+      };
+    });
+}
+
+function buildBestFriendStats(
+  eligibleDrinks: EligibleAnalyticsDrink[],
+  people: PersonRow[],
+): BestFriendStat[] {
+  if (people.length !== 2) return [];
+
+  const [firstPerson, secondPerson] = people;
+  const firstDrinks = eligibleDrinks.filter(
+    ({ drink }) => drink.person_id === firstPerson.id,
+  );
+  const secondDrinks = eligibleDrinks.filter(
+    ({ drink }) => drink.person_id === secondPerson.id,
+  );
+  let firstIndex = 0;
+  let secondIndex = 0;
+  let matchedDrinkCount = 0;
+
+  while (firstIndex < firstDrinks.length && secondIndex < secondDrinks.length) {
+    const firstTimestampMs = firstDrinks[firstIndex].consumedAt.getTime();
+    const secondTimestampMs = secondDrinks[secondIndex].consumedAt.getTime();
+    const differenceMs = firstTimestampMs - secondTimestampMs;
+
+    if (Math.abs(differenceMs) <= 60_000) {
+      matchedDrinkCount += 1;
+      firstIndex += 1;
+      secondIndex += 1;
+    } else if (differenceMs < 0) {
+      firstIndex += 1;
+    } else {
+      secondIndex += 1;
+    }
+  }
+
+  return people.map((person) => {
+    const totalDrinkCount =
+      person.id === firstPerson.id ? firstDrinks.length : secondDrinks.length;
+
+    return {
+      personId: person.id,
+      personName: person.display_name ?? person.name,
+      matchedDrinkCount,
+      totalDrinkCount,
+      percentage:
+        totalDrinkCount > 0
+          ? (matchedDrinkCount / totalDrinkCount) * 100
+          : null,
+    };
+  });
+}
+
+function buildAllTimeRecords(drinks: AllTimeRecordDrinkRow[]): AllTimeRecords {
+  const dailyCounts = new Map<
+    string,
+    {
+      personId: number;
+      personName: string;
+      drinkCount: number;
+      dateKey: string;
+      dateConsumedAt: string;
+    }
+  >();
+  const householdDailyCounts = new Map<
+    string,
+    { drinkCount: number; dateConsumedAt: string }
+  >();
+  let earliestCup:
+    | (NonNullable<AllTimeRecords["earliestCup"]> & {
+        id: number;
+        localTimeSeconds: number;
+        timestampMs: number;
+      })
+    | null = null;
+
+  for (const drink of drinks) {
+    const consumedAt = parseUtcDateTime(drink.consumed_at);
+
+    if (!consumedAt) continue;
+
+    const date = getCopenhagenDateParts(consumedAt);
+    const dateKey = `${date.year}-${String(date.month).padStart(2, "0")}-${String(date.day).padStart(2, "0")}`;
+    const dayKey = `${drink.person_id}:${dateKey}`;
+    const existingDay = dailyCounts.get(dayKey);
+
+    if (existingDay) {
+      existingDay.drinkCount += 1;
+    } else {
+      dailyCounts.set(dayKey, {
+        personId: drink.person_id,
+        personName: drink.person_name,
+        drinkCount: 1,
+        dateKey,
+        dateConsumedAt: drink.consumed_at,
+      });
+    }
+
+    const householdDay = householdDailyCounts.get(dateKey);
+
+    if (householdDay) {
+      householdDay.drinkCount += 1;
+    } else {
+      householdDailyCounts.set(dateKey, {
+        drinkCount: 1,
+        dateConsumedAt: drink.consumed_at,
+      });
+    }
+
+    const localTimeSeconds = date.hour * 3_600 + date.minute * 60 + date.second;
+    const timestampMs = consumedAt.getTime();
+
+    if (
+      !earliestCup ||
+      localTimeSeconds < earliestCup.localTimeSeconds ||
+      (localTimeSeconds === earliestCup.localTimeSeconds &&
+        (timestampMs < earliestCup.timestampMs ||
+          (timestampMs === earliestCup.timestampMs &&
+            drink.id < earliestCup.id)))
+    ) {
+      earliestCup = {
+        id: drink.id,
+        personId: drink.person_id,
+        personName: drink.person_name,
+        consumedAt: drink.consumed_at,
+        localTimeSeconds,
+        timestampMs,
+      };
+    }
+  }
+
+  let mostCupsInDay: AllTimeRecords["mostCupsInDay"] = null;
+  let mostCupsDateKey = "";
+
+  for (const day of dailyCounts.values()) {
+    if (
+      !mostCupsInDay ||
+      day.drinkCount > mostCupsInDay.drinkCount ||
+      (day.drinkCount === mostCupsInDay.drinkCount &&
+        (day.dateKey > mostCupsDateKey ||
+          (day.dateKey === mostCupsDateKey &&
+            day.personName.localeCompare(mostCupsInDay.personName) < 0)))
+    ) {
+      mostCupsInDay = {
+        personId: day.personId,
+        personName: day.personName,
+        drinkCount: day.drinkCount,
+        dateConsumedAt: day.dateConsumedAt,
+      };
+      mostCupsDateKey = day.dateKey;
+    }
+  }
+
+  let mostCupsInHouseholdDay: AllTimeRecords["mostCupsInHouseholdDay"] = null;
+  let mostCupsInHouseholdDateKey = "";
+
+  for (const [dateKey, day] of householdDailyCounts) {
+    if (
+      !mostCupsInHouseholdDay ||
+      day.drinkCount > mostCupsInHouseholdDay.drinkCount ||
+      (day.drinkCount === mostCupsInHouseholdDay.drinkCount &&
+        dateKey > mostCupsInHouseholdDateKey)
+    ) {
+      mostCupsInHouseholdDay = day;
+      mostCupsInHouseholdDateKey = dateKey;
+    }
+  }
+
+  return {
+    mostCupsInDay,
+    earliestCup: earliestCup
+      ? {
+          personId: earliestCup.personId,
+          personName: earliestCup.personName,
+          consumedAt: earliestCup.consumedAt,
+        }
+      : null,
+    mostCupsInHouseholdDay,
+  };
 }
 
 function buildEconomyAnalytics(
@@ -2805,6 +3497,10 @@ function getEconomyElapsedDayCount(
 
 function roundCurrency(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function formatHourSlot(hour: number) {
+  return `${hour}:00 → ${hour}:59`;
 }
 
 function formatInterval(intervalMs: number) {
