@@ -2291,11 +2291,11 @@ export default function Home({ loaderData }: Route.ComponentProps) {
           </CardHeader>
 
           <CardContent>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-x-4 gap-y-0 md:grid-cols-2">
               {lifetimeEconomy.comparisons.map((comparison) => (
                 <Card
                   key={comparison.key}
-                  className="border-zinc-800 bg-transparent ring-0"
+                  className="border-zinc-800 bg-transparent ring-0 py-2"
                 >
                   <CardContent className="flex items-center gap-4">
                     <img
