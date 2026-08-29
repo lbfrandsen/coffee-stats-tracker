@@ -2,10 +2,10 @@ import type { Route } from "./+types/info";
 
 export function meta({}: Route.MetaArgs) {
   return [
-    { title: "Info | Kaffe Mændene" },
+    { title: "Info | Kaffemændene" },
     {
       name: "description",
-      content: "Information about Kaffe Mændene.",
+      content: "Information about Kaffemændene.",
     },
   ];
 }
