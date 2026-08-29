@@ -1430,7 +1430,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                 <p className="mt-1 text-xs text-zinc-500">
                   {primetime.hour === null
                     ? "No drinks in this period."
-                    : `${primetime.drinkCount} ${primetime.drinkCount === 1 ? "drink" : "drinks"}`}
+                    : `${primetime.drinkCount} ${primetime.drinkCount === 1 ? "drink i tidsintervallet for perioden" : "drinks i tidsintervallet for perioden"}`}
                 </p>
               </div>
             ))}
