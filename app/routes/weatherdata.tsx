@@ -446,7 +446,7 @@ export default function WeatherData() {
           />
 
           <CardHeader className="relative z-10 border-b border-transparent">
-            <CardTitle className="text-center text-2xl uppercase tracking-widest text-cyan-300 [text-shadow:0_2px_3px_rgba(0,0,0,0.9)]">
+            <CardTitle className="bg-linear-to-b from-white via-cyan-100 to-cyan-300 bg-clip-text  text-center text-2xl font-black uppercase tracking-[0.18em] text-cyan-300 antialiased [text-shadow:0_2px_3px_rgba(0,0,0,0.9)]">
               Vejret ved seneste kop
             </CardTitle>
           </CardHeader>
@@ -881,10 +881,7 @@ function buildWeatherCategoryStats(
 
 function getLinearTrend(
   points: TemperatureCupPoint[],
-): readonly [
-  { x: number; y: number },
-  { x: number; y: number },
-] | null {
+): readonly [{ x: number; y: number }, { x: number; y: number }] | null {
   if (points.length < 2) {
     return null;
   }
