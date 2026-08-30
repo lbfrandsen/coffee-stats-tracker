@@ -110,6 +110,23 @@ export default function Mugs({ loaderData }: Route.ComponentProps) {
           totalUses={getTotalUses("DTU Kemi Kop")}
           description="DTU koppen er den mindst brugte kop i samlingen. Paven læser ikke kemi, men fik dog 10 i sit eneste kemikursus, hvilket i nogen grad berettiger dens eksistens. Hvordan den har fundet sin vej ind i samlingen er nok bedst, at man ikke bekymrer sig om."
         />
+
+        <MugCard
+          image="https://assets.kaffe.lucasfrandsen.dk/placeholder.webp"
+          alt="lucas-termos"
+          title="Lucas' Termokrus"
+          totalUses={getTotalUses("Pavens Termokrus")}
+          description="Termokruset bruges når Paven er på farten, primært når han skal på uni. Paven har haft mange forskellige termokrus igennem tiden, bl.a. en som blev ofret for at varme noget tørspaghetti op i 2.000 meters højde i det nordlige Norge (det virkede ikke, så der blev brugt en afskåret Monsterdåse i stedet). Dette termokrus er blevet den nye daily driver, fordi det var den billigste på Amazon."
+          imageSide="right"
+        />
+
+        <MugCard
+          image="https://assets.kaffe.lucasfrandsen.dk/placeholder.webp"
+          alt="gastro-kop"
+          title="Gastro Hospitalskoppen"
+          totalUses={getTotalUses("Gastro Hospitalskoppen")}
+          description="En kaffekop, som minder til forveksling meget om dem, der benyttes af personalet på Hvidovre Hospital. Ligesom med DTU Kemi Koppen, skal man ikke tænke for meget over, hvordan den er endt i samlingen."
+        />
       </section>
     </main>
   );
