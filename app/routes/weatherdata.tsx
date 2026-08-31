@@ -151,8 +151,8 @@ const WEATHER_BACKDROPS = {
     objectPosition: "50% 18%",
   },
   rainy: {
-    url: "https://assets.kaffe.lucasfrandsen.dk/weather-backdrops/rainy.webp",
-    objectPosition: "50% 60%",
+    url: "https://assets.kaffe.lucasfrandsen.dk/weather-backdrops/rainy2.webp",
+    objectPosition: "50% 45%",
   },
 } as const;
 
@@ -845,7 +845,7 @@ function getWeatherBackdrop(weather: LatestCupWeatherRow) {
     return WEATHER_BACKDROPS.cloudy;
   }
 
-  return WEATHER_BACKDROPS.sunny;
+  return WEATHER_BACKDROPS.rainy;
 }
 
 function buildWeatherCategoryStats(
