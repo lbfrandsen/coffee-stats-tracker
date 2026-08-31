@@ -845,7 +845,7 @@ function getWeatherBackdrop(weather: LatestCupWeatherRow) {
     return WEATHER_BACKDROPS.cloudy;
   }
 
-  return WEATHER_BACKDROPS.rainy;
+  return WEATHER_BACKDROPS.sunny;
 }
 
 function buildWeatherCategoryStats(
