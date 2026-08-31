@@ -89,11 +89,32 @@ type WeatherExtremeRow = {
   person_name: string;
 };
 
+type PersonWeatherProfileRow = {
+  person_id: number;
+  person_name: string;
+  weather_cup_count: number;
+  average_temperature: number | null;
+  minimum_temperature: number | null;
+  maximum_temperature: number | null;
+  common_weather: WeatherCategory | null;
+  rainy_cup_percentage: number | null;
+  average_wind_speed: number | null;
+  average_humidity: number | null;
+  average_rainy_precipitation: number | null;
+  sunny_percentage: number | null;
+  cloudy_percentage: number | null;
+  rainy_percentage: number | null;
+};
+
 type WeatherLoaderData = {
   latestCupWeather: LatestCupWeatherRow | null;
   weatherCategoryStats: WeatherCategoryStat[];
   temperatureCupPoints: TemperatureCupPoint[];
   weatherExtremes: WeatherExtremeRow[];
+  personWeatherProfiles: {
+    paven: PersonWeatherProfileRow | null;
+    burgerLars: PersonWeatherProfileRow | null;
+  };
 };
 
 const WEATHER_CATEGORY_ORDER: WeatherCategory[] = ["sunny", "cloudy", "rainy"];
@@ -104,23 +125,14 @@ const WEATHER_CATEGORY_DETAILS = {
   rainy: { label: "Regnvejr", Icon: CloudRain },
 } as const;
 
-const WEATHER_EXTREME_ORDER: WeatherExtremeKind[] = [
-  "coldest",
-  "warmest",
-  "wettest",
-  "windiest",
-];
-
-const WEATHER_EXTREME_DETAILS = {
-  coldest: { label: "Koldeste kop" },
-  warmest: { label: "Varmeste kop" },
-  wettest: { label: "Vådeste kop" },
-  windiest: { label: "Mest blæsende kop" },
-} as const;
-
 const TEMPERATURE_FORMATTER = new Intl.NumberFormat("da-DK", {
   minimumFractionDigits: 1,
   maximumFractionDigits: 1,
+});
+
+const CORRELATION_FORMATTER = new Intl.NumberFormat("da-DK", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
 });
 
 const CHART_DATE_FORMATTER = new Intl.DateTimeFormat("da-DK", {
@@ -175,6 +187,7 @@ export async function loader(
       weatherCategoryResult,
       temperatureCupResult,
       weatherExtremeResult,
+      personWeatherProfileResult,
     ] = await Promise.all([
       env.DB.prepare(
         `
@@ -380,7 +393,136 @@ export async function loader(
           WHERE windiest_rank = 1 AND wind_speed_ms IS NOT NULL
         `,
       ).all<WeatherExtremeRow>(),
+      env.DB.prepare(
+        `
+          WITH selected_people AS (
+            SELECT
+              p.id AS person_id,
+              COALESCE(p.display_name, p.name) AS person_name
+            FROM persons p
+            WHERE LOWER(COALESCE(p.display_name, p.name)) IN (
+              'paven',
+              'burger lars'
+            )
+          ),
+          person_weather AS (
+            SELECT
+              selected_people.person_id,
+              selected_people.person_name,
+              w.drink_id,
+              w.temperature_c,
+              w.precipitation_mm,
+              w.raining,
+              w.cloud_cover,
+              w.humidity_percent,
+              w.wind_speed_ms,
+              CASE
+                WHEN w.drink_id IS NULL THEN NULL
+                WHEN w.raining = 1 THEN 'rainy'
+                WHEN w.cloud_cover >= 60 THEN 'cloudy'
+                ELSE 'sunny'
+              END AS category
+            FROM selected_people
+            LEFT JOIN drinks d ON d.person_id = selected_people.person_id
+            LEFT JOIN weather_records w ON w.drink_id = d.id
+          ),
+          profile_totals AS (
+            SELECT
+              person_id,
+              person_name,
+              COUNT(drink_id) AS weather_cup_count,
+              AVG(temperature_c) AS average_temperature,
+              MIN(temperature_c) AS minimum_temperature,
+              MAX(temperature_c) AS maximum_temperature,
+              CASE
+                WHEN COUNT(CASE WHEN raining IS NOT NULL THEN 1 END) > 0
+                  THEN 100.0 * SUM(CASE WHEN raining = 1 THEN 1 ELSE 0 END)
+                    / COUNT(CASE WHEN raining IS NOT NULL THEN 1 END)
+                ELSE NULL
+              END AS rainy_cup_percentage,
+              AVG(wind_speed_ms) AS average_wind_speed,
+              AVG(humidity_percent) AS average_humidity,
+              AVG(
+                CASE
+                  WHEN raining = 1 THEN precipitation_mm
+                  ELSE NULL
+                END
+              ) AS average_rainy_precipitation,
+              CASE
+                WHEN COUNT(drink_id) > 0
+                  THEN 100.0 * SUM(CASE WHEN category = 'sunny' THEN 1 ELSE 0 END)
+                    / COUNT(drink_id)
+                ELSE NULL
+              END AS sunny_percentage,
+              CASE
+                WHEN COUNT(drink_id) > 0
+                  THEN 100.0 * SUM(CASE WHEN category = 'cloudy' THEN 1 ELSE 0 END)
+                    / COUNT(drink_id)
+                ELSE NULL
+              END AS cloudy_percentage,
+              CASE
+                WHEN COUNT(drink_id) > 0
+                  THEN 100.0 * SUM(CASE WHEN category = 'rainy' THEN 1 ELSE 0 END)
+                    / COUNT(drink_id)
+                ELSE NULL
+              END AS rainy_percentage
+            FROM person_weather
+            GROUP BY person_id, person_name
+          ),
+          category_counts AS (
+            SELECT
+              person_id,
+              category,
+              COUNT(*) AS category_count
+            FROM person_weather
+            WHERE drink_id IS NOT NULL AND category IS NOT NULL
+            GROUP BY person_id, category
+          ),
+          ranked_categories AS (
+            SELECT
+              person_id,
+              category,
+              ROW_NUMBER() OVER (
+                PARTITION BY person_id
+                ORDER BY
+                  category_count DESC,
+                  CASE category
+                    WHEN 'sunny' THEN 1
+                    WHEN 'cloudy' THEN 2
+                    ELSE 3
+                  END
+              ) AS category_rank
+            FROM category_counts
+          )
+          SELECT
+            profile_totals.person_id,
+            profile_totals.person_name,
+            profile_totals.weather_cup_count,
+            profile_totals.average_temperature,
+            profile_totals.minimum_temperature,
+            profile_totals.maximum_temperature,
+            ranked_categories.category AS common_weather,
+            profile_totals.rainy_cup_percentage,
+            profile_totals.average_wind_speed,
+            profile_totals.average_humidity,
+            profile_totals.average_rainy_precipitation,
+            profile_totals.sunny_percentage,
+            profile_totals.cloudy_percentage,
+            profile_totals.rainy_percentage
+          FROM profile_totals
+          LEFT JOIN ranked_categories
+            ON ranked_categories.person_id = profile_totals.person_id
+            AND ranked_categories.category_rank = 1
+          ORDER BY
+            CASE LOWER(profile_totals.person_name)
+              WHEN 'paven' THEN 1
+              ELSE 2
+            END
+        `,
+      ).all<PersonWeatherProfileRow>(),
     ]);
+
+    const personWeatherProfiles = personWeatherProfileResult.results;
 
     return {
       latestCupWeather,
@@ -396,6 +538,16 @@ export async function loader(
         cups: row.cup_count,
       })),
       weatherExtremes: weatherExtremeResult.results,
+      personWeatherProfiles: {
+        paven:
+          personWeatherProfiles.find(
+            (profile) => profile.person_name.toLowerCase() === "paven",
+          ) ?? null,
+        burgerLars:
+          personWeatherProfiles.find(
+            (profile) => profile.person_name.toLowerCase() === "burger lars",
+          ) ?? null,
+      },
     };
   } catch (error) {
     console.warn("Unable to load the latest cup weather from D1", error);
@@ -405,6 +557,10 @@ export async function loader(
       weatherCategoryStats: buildWeatherCategoryStats([]),
       temperatureCupPoints: [],
       weatherExtremes: [],
+      personWeatherProfiles: {
+        paven: null,
+        burgerLars: null,
+      },
     };
   }
 }
@@ -415,11 +571,17 @@ export default function WeatherData() {
     weatherCategoryStats,
     temperatureCupPoints,
     weatherExtremes,
+    personWeatherProfiles,
   } = useLoaderData<typeof loader>();
   const weatherBackdrop = latestCupWeather
     ? getWeatherBackdrop(latestCupWeather)
     : null;
   const temperatureTrend = getLinearTrend(temperatureCupPoints);
+  const temperatureCorrelation = getPearsonCorrelation(temperatureCupPoints);
+  const coldestCup = weatherExtremes.find((row) => row.kind === "coldest");
+  const warmestCup = weatherExtremes.find((row) => row.kind === "warmest");
+  const wettestCup = weatherExtremes.find((row) => row.kind === "wettest");
+  const windiestCup = weatherExtremes.find((row) => row.kind === "windiest");
 
   return (
     <main className="mx-auto max-w-6xl space-y-4 px-4 py-8 sm:px-6 lg:px-8">
@@ -606,121 +768,152 @@ export default function WeatherData() {
           </CardHeader>
           <CardContent>
             {temperatureCupPoints.length > 0 ? (
-              <ChartContainer
-                config={temperatureCupsChartConfig}
-                className="h-96 w-full aspect-auto [&_.recharts-cartesian-axis-tick-value]:fill-white! [&_.recharts-cartesian-axis-tick_text]:fill-white!"
-                initialDimension={{ width: 1040, height: 384 }}
-              >
-                <ScatterChart
-                  accessibilityLayer
-                  margin={{ top: 12, right: 20, left: 12, bottom: 20 }}
+              <>
+                <ChartContainer
+                  config={temperatureCupsChartConfig}
+                  className="h-96 w-full aspect-auto [&_.recharts-cartesian-axis-tick-value]:fill-white! [&_.recharts-cartesian-axis-tick_text]:fill-white!"
+                  initialDimension={{ width: 1040, height: 384 }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis
-                    type="number"
-                    dataKey="temperature"
-                    name="Temperatur"
-                    unit="°"
-                    tick={{ fill: "white" }}
-                    axisLine={false}
-                    tickLine={false}
-                    tickMargin={10}
-                    domain={[
-                      (dataMin: number) => Math.floor(dataMin) - 1,
-                      (dataMax: number) => Math.ceil(dataMax) + 1,
-                    ]}
-                    tickFormatter={(value: number) =>
-                      `${TEMPERATURE_FORMATTER.format(value)}`
-                    }
-                    label={{
-                      value: "Temperatur",
-                      position: "insideBottom",
-                      offset: -12,
-                      fill: "white",
-                    }}
-                  />
-                  <YAxis
-                    type="number"
-                    dataKey="cups"
-                    name="Kopper"
-                    tick={{ fill: "white" }}
-                    axisLine={false}
-                    tickLine={false}
-                    tickMargin={8}
-                    allowDecimals={false}
-                    domain={[
-                      0,
-                      (dataMax: number) => Math.max(1, Math.ceil(dataMax) + 1),
-                    ]}
-                    width={36}
-                    label={{
-                      value: "Kopper pr. dag",
-                      angle: -90,
-                      position: "insideLeft",
-                      offset: -4,
-                      fill: "white",
-                    }}
-                  />
-                  <ChartTooltip
-                    cursor={false}
-                    content={({ active, payload }) => {
-                      const point = payload?.[0]?.payload as
-                        | TemperatureCupPoint
-                        | undefined;
-
-                      if (!active || !point) {
-                        return null;
+                  <ScatterChart
+                    accessibilityLayer
+                    margin={{ top: 12, right: 20, left: 12, bottom: 20 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis
+                      type="number"
+                      dataKey="temperature"
+                      name="Temperatur"
+                      unit="°"
+                      tick={{ fill: "white" }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickMargin={10}
+                      domain={[
+                        (dataMin: number) => Math.floor(dataMin) - 1,
+                        (dataMax: number) => Math.ceil(dataMax) + 1,
+                      ]}
+                      tickFormatter={(value: number) =>
+                        `${TEMPERATURE_FORMATTER.format(value)}`
                       }
+                      label={{
+                        value: "Temperatur",
+                        position: "insideBottom",
+                        offset: -12,
+                        fill: "white",
+                      }}
+                    />
+                    <YAxis
+                      type="number"
+                      dataKey="cups"
+                      name="Kopper"
+                      tick={{ fill: "white" }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickMargin={8}
+                      allowDecimals={false}
+                      domain={[
+                        0,
+                        (dataMax: number) =>
+                          Math.max(1, Math.ceil(dataMax) + 1),
+                      ]}
+                      width={36}
+                      label={{
+                        value: "Kopper pr. dag",
+                        angle: -90,
+                        position: "insideLeft",
+                        offset: -4,
+                        fill: "white",
+                      }}
+                    />
+                    <ChartTooltip
+                      cursor={false}
+                      content={({ active, payload }) => {
+                        const point = payload?.[0]?.payload as
+                          | TemperatureCupPoint
+                          | undefined;
 
-                      return (
-                        <div className="grid min-w-40 gap-2 rounded-lg border border-zinc-800/80 bg-zinc-950 px-3 py-2 text-xs shadow-xl">
-                          <p className="font-medium text-zinc-100">
-                            {point.dateLabel}
-                          </p>
-                          <div className="grid gap-1.5">
-                            <div className="flex items-center justify-between gap-5">
-                              <span className="flex items-center gap-2 text-zinc-400">
-                                <span className="size-2 rounded-full bg-cyan-300" />
-                                Kopper
-                              </span>
-                              <span className="font-mono font-medium tabular-nums text-zinc-100">
-                                {point.cups}
-                              </span>
-                            </div>
-                            <div className="flex items-center justify-between gap-5">
-                              <span className="flex items-center gap-2 text-zinc-400">
-                                <span className="size-2 rounded-full bg-teal-300" />
-                                Gns. temperatur
-                              </span>
-                              <span className="font-mono font-medium tabular-nums text-zinc-100">
-                                {TEMPERATURE_FORMATTER.format(
-                                  point.temperature,
-                                )}
-                                °
-                              </span>
+                        if (!active || !point) {
+                          return null;
+                        }
+
+                        return (
+                          <div className="grid min-w-40 gap-2 rounded-lg border border-zinc-800/80 bg-zinc-950 px-3 py-2 text-xs shadow-xl">
+                            <p className="font-medium text-zinc-100">
+                              {point.dateLabel}
+                            </p>
+                            <div className="grid gap-1.5">
+                              <div className="flex items-center justify-between gap-5">
+                                <span className="flex items-center gap-2 text-zinc-400">
+                                  <span className="size-2 rounded-full bg-cyan-300" />
+                                  Kopper
+                                </span>
+                                <span className="font-mono font-medium tabular-nums text-zinc-100">
+                                  {point.cups}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between gap-5">
+                                <span className="flex items-center gap-2 text-zinc-400">
+                                  <span className="size-2 rounded-full bg-teal-300" />
+                                  Gns. temperatur
+                                </span>
+                                <span className="font-mono font-medium tabular-nums text-zinc-100">
+                                  {TEMPERATURE_FORMATTER.format(
+                                    point.temperature,
+                                  )}
+                                  °
+                                </span>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      );
-                    }}
-                  />
-                  {temperatureTrend && (
-                    <ReferenceLine
-                      segment={temperatureTrend}
-                      stroke="var(--color-trend)"
-                      strokeWidth={3}
-                      strokeLinecap="round"
-                      ifOverflow="extendDomain"
+                        );
+                      }}
                     />
-                  )}
-                  <Scatter
-                    name="cups"
-                    data={temperatureCupPoints}
-                    fill="var(--color-cups)"
-                    fillOpacity={0.85}
-                  />
-                </ScatterChart>
-              </ChartContainer>
+                    {temperatureTrend && (
+                      <ReferenceLine
+                        segment={temperatureTrend}
+                        stroke="var(--color-trend)"
+                        strokeWidth={3}
+                        strokeLinecap="round"
+                        ifOverflow="extendDomain"
+                      />
+                    )}
+                    <Scatter
+                      name="cups"
+                      data={temperatureCupPoints}
+                      fill="var(--color-cups)"
+                      fillOpacity={0.85}
+                    />
+                  </ScatterChart>
+                </ChartContainer>
+
+                <div className="mt-3 rounded-lg bg-zinc-900/50 px-4 py-3">
+                  <p className="text-sm leading-relaxed text-zinc-300">
+                    {temperatureCorrelation === null ? (
+                      getCorrelationDescription(
+                        temperatureCorrelation,
+                        temperatureCupPoints.length,
+                      )
+                    ) : (
+                      <>
+                        <span className="font-mono font-semibold tabular-nums text-teal-300">
+                          r ={" "}
+                          {CORRELATION_FORMATTER.format(temperatureCorrelation)}
+                        </span>{" "}
+                        ·{" "}
+                        {getCorrelationDescription(
+                          temperatureCorrelation,
+                          temperatureCupPoints.length,
+                        )}
+                      </>
+                    )}
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Baseret på {temperatureCupPoints.length} dage med vejrdata.
+                    Husk, at korrelation er ikke lig med kausalitet - så vi kan
+                    ikke sige med sikkerhed, at der er en direkte sammenhæng.
+                  </p>
+                </div>
+              </>
             ) : (
               <div className="flex h-64 items-center justify-center text-sm text-zinc-400">
                 Ikke nok vejrdata til at vise grafen endnu.
@@ -734,54 +927,436 @@ export default function WeatherData() {
         className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
         aria-label="Vejrrekorder"
       >
-        {WEATHER_EXTREME_ORDER.map((kind) => {
-          const { label } = WEATHER_EXTREME_DETAILS[kind];
-          const extreme = weatherExtremes.find((row) => row.kind === kind);
-
-          return (
-            <Card
-              key={kind}
-              size="sm"
-              className="gap-2 border border-cyan-400/25 bg-zinc-950/80 ring-1 ring-cyan-400/35"
-            >
-              <CardHeader>
-                <CardTitle className="text-base! uppercase">{label}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {extreme ? (
-                  <>
-                    <p className="text-2xl font-semibold tabular-nums tracking-tight text-cyan-300">
-                      {formatWeatherExtremeValue(kind, extreme.value)}
-                    </p>
-                    <div className="space-y-0.5 text-xs text-zinc-500">
-                      <p className="truncate text-zinc-400">
-                        <span
-                          className="font-medium"
-                          style={{
-                            color: getPersonDisplayColor(
-                              extreme.person_name,
-                              extreme.person_id,
-                            ),
-                          }}
-                        >
-                          {extreme.person_name}
-                        </span>{" "}
-                        · {extreme.cup_name}
-                      </p>
-                      <p className="tabular-nums">
-                        {formatDateTime(extreme.consumed_at)}
-                      </p>
-                    </div>
-                  </>
-                ) : (
-                  <p className="py-3 text-sm text-zinc-500">
-                    Ingen vejrdata endnu.
+        <Card
+          size="sm"
+          className="gap-2 border border-cyan-400/25 bg-zinc-950/80 ring-1 ring-cyan-400/35"
+        >
+          <CardHeader>
+            <CardTitle className="text-base! uppercase">Koldeste kop</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {coldestCup ? (
+              <>
+                <p className="text-2xl font-semibold tabular-nums tracking-tight text-cyan-300">
+                  {formatWeatherExtremeValue("coldest", coldestCup.value)}
+                </p>
+                <div className="space-y-0.5 text-xs text-zinc-500">
+                  <p className="truncate text-zinc-400">
+                    <span
+                      className="font-medium"
+                      style={{
+                        color: getPersonDisplayColor(
+                          coldestCup.person_name,
+                          coldestCup.person_id,
+                        ),
+                      }}
+                    >
+                      {coldestCup.person_name}
+                    </span>{" "}
+                    · {coldestCup.cup_name}
                   </p>
+                  <p className="tabular-nums">
+                    {formatDateTime(coldestCup.consumed_at)}
+                  </p>
+                </div>
+              </>
+            ) : (
+              <p className="py-3 text-sm text-zinc-500">
+                Ingen vejrdata endnu.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card
+          size="sm"
+          className="gap-2 border border-cyan-400/25 bg-zinc-950/80 ring-1 ring-cyan-400/35"
+        >
+          <CardHeader>
+            <CardTitle className="text-base! uppercase">Varmeste kop</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {warmestCup ? (
+              <>
+                <p className="text-2xl font-semibold tabular-nums tracking-tight text-cyan-300">
+                  {formatWeatherExtremeValue("warmest", warmestCup.value)}
+                </p>
+                <div className="space-y-0.5 text-xs text-zinc-500">
+                  <p className="truncate text-zinc-400">
+                    <span
+                      className="font-medium"
+                      style={{
+                        color: getPersonDisplayColor(
+                          warmestCup.person_name,
+                          warmestCup.person_id,
+                        ),
+                      }}
+                    >
+                      {warmestCup.person_name}
+                    </span>{" "}
+                    · {warmestCup.cup_name}
+                  </p>
+                  <p className="tabular-nums">
+                    {formatDateTime(warmestCup.consumed_at)}
+                  </p>
+                </div>
+              </>
+            ) : (
+              <p className="py-3 text-sm text-zinc-500">
+                Ingen vejrdata endnu.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card
+          size="sm"
+          className="gap-2 border border-cyan-400/25 bg-zinc-950/80 ring-1 ring-cyan-400/35"
+        >
+          <CardHeader>
+            <CardTitle className="text-base! uppercase">Vådeste kop</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {wettestCup ? (
+              <>
+                <p className="text-2xl font-semibold tabular-nums tracking-tight text-cyan-300">
+                  {formatWeatherExtremeValue("wettest", wettestCup.value)}
+                </p>
+                <div className="space-y-0.5 text-xs text-zinc-500">
+                  <p className="truncate text-zinc-400">
+                    <span
+                      className="font-medium"
+                      style={{
+                        color: getPersonDisplayColor(
+                          wettestCup.person_name,
+                          wettestCup.person_id,
+                        ),
+                      }}
+                    >
+                      {wettestCup.person_name}
+                    </span>{" "}
+                    · {wettestCup.cup_name}
+                  </p>
+                  <p className="tabular-nums">
+                    {formatDateTime(wettestCup.consumed_at)}
+                  </p>
+                </div>
+              </>
+            ) : (
+              <p className="py-3 text-sm text-zinc-500">
+                Ingen vejrdata endnu.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card
+          size="sm"
+          className="gap-2 border border-cyan-400/25 bg-zinc-950/80 ring-1 ring-cyan-400/35"
+        >
+          <CardHeader>
+            <CardTitle className="text-base! uppercase">
+              Mest blæsende kop
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {windiestCup ? (
+              <>
+                <p className="text-2xl font-semibold tabular-nums tracking-tight text-cyan-300">
+                  {formatWeatherExtremeValue("windiest", windiestCup.value)}
+                </p>
+                <div className="space-y-0.5 text-xs text-zinc-500">
+                  <p className="truncate text-zinc-400">
+                    <span
+                      className="font-medium"
+                      style={{
+                        color: getPersonDisplayColor(
+                          windiestCup.person_name,
+                          windiestCup.person_id,
+                        ),
+                      }}
+                    >
+                      {windiestCup.person_name}
+                    </span>{" "}
+                    · {windiestCup.cup_name}
+                  </p>
+                  <p className="tabular-nums">
+                    {formatDateTime(windiestCup.consumed_at)}
+                  </p>
+                </div>
+              </>
+            ) : (
+              <p className="py-3 text-sm text-zinc-500">
+                Ingen vejrdata endnu.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section
+        className="grid gap-4 lg:grid-cols-2"
+        aria-label="Personlige vejrprofiler"
+      >
+        <Card className="border-cyan-400/25 bg-zinc-950/80 ring-0">
+          <CardHeader className="border-b border-zinc-800">
+            <CardTitle
+              className="uppercase"
+              style={{
+                color: getPersonDisplayColor(
+                  "Paven",
+                  personWeatherProfiles.paven?.person_id ?? 0,
+                ),
+              }}
+            >
+              Paven
+            </CardTitle>
+            <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
+              {personWeatherProfiles.paven?.weather_cup_count ?? 0} kopper med
+              vejrdata
+            </CardAction>
+          </CardHeader>
+          <CardContent className="grid gap-x-8 gap-y-5 sm:grid-cols-2">
+            <div>
+              <p className="text-xs font-medium uppercase text-zinc-500">
+                Gns. temperatur
+              </p>
+              <p className="mt-1 text-xl font-semibold tabular-nums text-cyan-300">
+                {formatTemperature(
+                  personWeatherProfiles.paven?.average_temperature ?? null,
                 )}
-              </CardContent>
-            </Card>
-          );
-        })}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase text-zinc-500">
+                Mest almindelige vejr
+              </p>
+              <p className="mt-1 text-xl font-semibold text-teal-300">
+                {formatWeatherCategory(
+                  personWeatherProfiles.paven?.common_weather ?? null,
+                )}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase text-zinc-500">
+                Kopper i regnvejr
+              </p>
+              <p className="mt-1 text-xl font-semibold tabular-nums text-cyan-300">
+                {formatNullablePercentage(
+                  personWeatherProfiles.paven?.rainy_cup_percentage ?? null,
+                )}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase text-zinc-500">
+                Gns. vindhastighed
+              </p>
+              <p className="mt-1 text-xl font-semibold tabular-nums text-cyan-300">
+                {formatLocalizedMeasurement(
+                  personWeatherProfiles.paven?.average_wind_speed ?? null,
+                  "m/s",
+                )}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase text-zinc-500">
+                Temperaturspænd
+              </p>
+              <p className="mt-1 text-xl font-semibold tabular-nums text-cyan-300">
+                {formatTemperatureRange(
+                  personWeatherProfiles.paven?.minimum_temperature ?? null,
+                  personWeatherProfiles.paven?.maximum_temperature ?? null,
+                )}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase text-zinc-500">
+                Gns. luftfugtighed
+              </p>
+              <p className="mt-1 text-xl font-semibold tabular-nums text-cyan-300">
+                {formatLocalizedMeasurement(
+                  personWeatherProfiles.paven?.average_humidity ?? null,
+                  "%",
+                )}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase text-zinc-500">
+                Gns. nedbør (kun ved regn)
+              </p>
+              <p className="mt-1 text-xl font-semibold tabular-nums text-cyan-300">
+                {formatLocalizedMeasurement(
+                  personWeatherProfiles.paven?.average_rainy_precipitation ??
+                    null,
+                  "mm",
+                )}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase text-zinc-500">
+                Vejrfordeling
+              </p>
+              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-sm tabular-nums">
+                <span>
+                  <span className="text-zinc-500">Sol </span>
+                  <span className="font-medium text-cyan-300">
+                    {formatNullablePercentage(
+                      personWeatherProfiles.paven?.sunny_percentage ?? null,
+                    )}
+                  </span>
+                </span>
+                <span>
+                  <span className="text-zinc-500">Skyer </span>
+                  <span className="font-medium text-cyan-300">
+                    {formatNullablePercentage(
+                      personWeatherProfiles.paven?.cloudy_percentage ?? null,
+                    )}
+                  </span>
+                </span>
+                <span>
+                  <span className="text-zinc-500">Regn </span>
+                  <span className="font-medium text-cyan-300">
+                    {formatNullablePercentage(
+                      personWeatherProfiles.paven?.rainy_percentage ?? null,
+                    )}
+                  </span>
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-cyan-400/25 bg-zinc-950/80 ring-0">
+          <CardHeader className="border-b border-zinc-800">
+            <CardTitle
+              className="uppercase"
+              style={{
+                color: getPersonDisplayColor(
+                  "Burger Lars",
+                  personWeatherProfiles.burgerLars?.person_id ?? 0,
+                ),
+              }}
+            >
+              Burger Lars
+            </CardTitle>
+            <CardAction className="self-center text-xs font-medium uppercase text-zinc-400">
+              {personWeatherProfiles.burgerLars?.weather_cup_count ?? 0} kopper
+              med vejrdata
+            </CardAction>
+          </CardHeader>
+          <CardContent className="grid gap-x-8 gap-y-5 sm:grid-cols-2">
+            <div>
+              <p className="text-xs font-medium uppercase text-zinc-500">
+                Gns. temperatur
+              </p>
+              <p className="mt-1 text-xl font-semibold tabular-nums text-cyan-300">
+                {formatTemperature(
+                  personWeatherProfiles.burgerLars?.average_temperature ?? null,
+                )}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase text-zinc-500">
+                Mest almindelige vejr
+              </p>
+              <p className="mt-1 text-xl font-semibold text-teal-300">
+                {formatWeatherCategory(
+                  personWeatherProfiles.burgerLars?.common_weather ?? null,
+                )}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase text-zinc-500">
+                Kopper i regnvejr
+              </p>
+              <p className="mt-1 text-xl font-semibold tabular-nums text-cyan-300">
+                {formatNullablePercentage(
+                  personWeatherProfiles.burgerLars?.rainy_cup_percentage ??
+                    null,
+                )}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase text-zinc-500">
+                Gns. vindhastighed
+              </p>
+              <p className="mt-1 text-xl font-semibold tabular-nums text-cyan-300">
+                {formatLocalizedMeasurement(
+                  personWeatherProfiles.burgerLars?.average_wind_speed ?? null,
+                  "m/s",
+                )}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase text-zinc-500">
+                Temperaturspænd
+              </p>
+              <p className="mt-1 text-xl font-semibold tabular-nums text-cyan-300">
+                {formatTemperatureRange(
+                  personWeatherProfiles.burgerLars?.minimum_temperature ?? null,
+                  personWeatherProfiles.burgerLars?.maximum_temperature ?? null,
+                )}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase text-zinc-500">
+                Gns. luftfugtighed
+              </p>
+              <p className="mt-1 text-xl font-semibold tabular-nums text-cyan-300">
+                {formatLocalizedMeasurement(
+                  personWeatherProfiles.burgerLars?.average_humidity ?? null,
+                  "%",
+                )}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase text-zinc-500">
+                Gns. nedbør (kun ved regn)
+              </p>
+              <p className="mt-1 text-xl font-semibold tabular-nums text-cyan-300">
+                {formatLocalizedMeasurement(
+                  personWeatherProfiles.burgerLars
+                    ?.average_rainy_precipitation ?? null,
+                  "mm",
+                )}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase text-zinc-500">
+                Vejrfordeling
+              </p>
+              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-sm tabular-nums">
+                <span>
+                  <span className="text-zinc-500">Sol </span>
+                  <span className="font-medium text-cyan-300">
+                    {formatNullablePercentage(
+                      personWeatherProfiles.burgerLars?.sunny_percentage ??
+                        null,
+                    )}
+                  </span>
+                </span>
+                <span>
+                  <span className="text-zinc-500">Skyer </span>
+                  <span className="font-medium text-cyan-300">
+                    {formatNullablePercentage(
+                      personWeatherProfiles.burgerLars?.cloudy_percentage ??
+                        null,
+                    )}
+                  </span>
+                </span>
+                <span>
+                  <span className="text-zinc-500">Regn </span>
+                  <span className="font-medium text-cyan-300">
+                    {formatNullablePercentage(
+                      personWeatherProfiles.burgerLars?.rainy_percentage ??
+                        null,
+                    )}
+                  </span>
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </section>
     </main>
   );
@@ -922,8 +1497,108 @@ function getLinearTrend(
   ];
 }
 
+function getPearsonCorrelation(points: TemperatureCupPoint[]) {
+  if (points.length < 3) {
+    return null;
+  }
+
+  const meanTemperature =
+    points.reduce((sum, point) => sum + point.temperature, 0) / points.length;
+  const meanCups =
+    points.reduce((sum, point) => sum + point.cups, 0) / points.length;
+  const covariance = points.reduce(
+    (sum, point) =>
+      sum + (point.temperature - meanTemperature) * (point.cups - meanCups),
+    0,
+  );
+  const temperatureVariance = points.reduce(
+    (sum, point) => sum + (point.temperature - meanTemperature) ** 2,
+    0,
+  );
+  const cupsVariance = points.reduce(
+    (sum, point) => sum + (point.cups - meanCups) ** 2,
+    0,
+  );
+  const denominator = Math.sqrt(temperatureVariance * cupsVariance);
+
+  return denominator === 0 ? null : covariance / denominator;
+}
+
 function formatPercentage(value: number) {
   return `${Math.round(value)}%`;
+}
+
+function formatNullablePercentage(value: number | null) {
+  return value === null ? "—" : formatPercentage(value);
+}
+
+function formatWeatherCategory(category: WeatherCategory | null) {
+  if (category === "sunny") {
+    return "Solskin";
+  }
+
+  if (category === "cloudy") {
+    return "Overskyet";
+  }
+
+  if (category === "rainy") {
+    return "Regnvejr";
+  }
+
+  return "—";
+}
+
+function formatLocalizedMeasurement(value: number | null, unit: string) {
+  return value === null
+    ? "—"
+    : `${TEMPERATURE_FORMATTER.format(value)} ${unit}`;
+}
+
+function formatTemperatureRange(
+  minimumTemperature: number | null,
+  maximumTemperature: number | null,
+) {
+  if (minimumTemperature === null || maximumTemperature === null) {
+    return "—";
+  }
+
+  return `${TEMPERATURE_FORMATTER.format(minimumTemperature)}°–${TEMPERATURE_FORMATTER.format(maximumTemperature)}°`;
+}
+
+function getCorrelationDescription(
+  correlation: number | null,
+  dayCount: number,
+) {
+  if (correlation === null || dayCount < 3) {
+    return "Der er endnu ikke nok dage til at vurdere sammenhængen.";
+  }
+
+  const strength = Math.abs(correlation);
+
+  if (strength < 0.1) {
+    return "Der er næsten ingen sammenhæng mellem temperatur og kaffeforbrug.";
+  }
+
+  let strengthLabel: string;
+
+  if (strength < 0.3) {
+    strengthLabel = "svag";
+  } else if (strength < 0.5) {
+    strengthLabel = "moderat";
+  } else if (strength < 0.7) {
+    strengthLabel = "tydelig";
+  } else {
+    strengthLabel = "stærk";
+  }
+
+  const directionLabel =
+    correlation > 0
+      ? "Varmere dage hænger sammen med flere kopper."
+      : "Varmere dage hænger sammen med færre kopper.";
+
+  return `Der er en ${strengthLabel} ${
+    correlation > 0 ? "positiv" : "negativ"
+  } sammenhæng. ${directionLabel}`;
 }
 
 function formatWeatherExtremeValue(kind: WeatherExtremeKind, value: number) {
