@@ -115,7 +115,7 @@ export default function Mugs({ loaderData }: Route.ComponentProps) {
           image="https://assets.kaffe.lucasfrandsen.dk/placeholder.webp"
           alt="lucas-termos"
           title="Lucas' Termokrus"
-          totalUses={getTotalUses("Pavens Termokrus")}
+          totalUses={getTotalUses("Lucas' Termokrus")}
           description="Termokruset bruges når Paven er på farten, primært når han skal på uni. Paven har haft mange forskellige termokrus igennem tiden, bl.a. en som blev ofret for at varme noget tørspaghetti op i 2.000 meters højde i det nordlige Norge (det virkede ikke, så der blev brugt en afskåret Monsterdåse i stedet). Dette termokrus er blevet den nye daily driver, fordi det var den billigste på Amazon."
           imageSide="right"
         />
