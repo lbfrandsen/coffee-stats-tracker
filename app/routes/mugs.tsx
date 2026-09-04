@@ -91,7 +91,7 @@ export default function Mugs({ loaderData }: Route.ComponentProps) {
           totalUses={getTotalUses("München Kop")}
           description="I efteråret 2025 er Paven på udveksling i det nordlige Norge, og inden for to uger smadrer han sin eneste kaffekop - med et koffeinproblem af den størrelse her, så er det jo en katastrofe.
           Paven får dog en rigtig tæt ven ved navn Matthias, som er en rigtig bror. Matthias er født og opvokset i München, Tyskland, og giver, uden at tøve, Paven denne kaffekop, som han har tilovers.
-          Pavens udvekslingsophold er dermed reddet, og han er forevigt taknemmelig for Matthias' generøsitet. München koppen kom selvfølgelig med hjem til Danmark, først Lyngby, så Frederiksberg og nu endeligt i Lunden, hvor den hører hjemme. Den bærer dermed stor affektionsværdi, og vil forevigt være et højtelsket minde i samlingen."
+          Pavens udvekslingsophold er dermed reddet, og han er for evigt taknemmelig for Matthias' generøsitet. München koppen kom selvfølgelig med hjem til Danmark, først Lyngby, så Frederiksberg og nu endeligt i Lunden, hvor den hører hjemme. Den bærer dermed stor affektionsværdi, og vil for evigt være et højtelsket minde i samlingen."
         />
 
         <MugCard

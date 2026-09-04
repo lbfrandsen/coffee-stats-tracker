@@ -1,6 +1,12 @@
 import { env } from "cloudflare:workers";
 import { Tooltip } from "@base-ui/react/tooltip";
-import { Check, ChevronDown, Info } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Info,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 
@@ -320,6 +326,8 @@ type AnalyticsRange = "today" | "week" | "month" | "all";
 
 type AnalyticsPeriod = {
   range: AnalyticsRange;
+  anchor: string | null;
+  isCurrent: boolean;
   title: string;
   subtitle: string;
   localStartMs: number | null;
@@ -406,7 +414,11 @@ export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const analyticsNow = new Date();
   const analyticsRange = parseAnalyticsRange(url.searchParams.get("range"));
-  const analyticsPeriod = getAnalyticsPeriod(analyticsRange, analyticsNow);
+  const analyticsPeriod = getAnalyticsPeriod(
+    analyticsRange,
+    analyticsNow,
+    url.searchParams.get("anchor"),
+  );
   const monthlyEconomyQueryPeriod = getMonthlyEconomyQueryPeriod(analyticsNow);
   const requestedDrinksPage = Number.parseInt(
     url.searchParams.get("drinksPage") ?? "1",
@@ -577,6 +589,8 @@ export async function loader({ request }: Route.LoaderArgs) {
       allDrinksRows: drinksResult.results,
       analytics: {
         range: analyticsRange,
+        anchor: analyticsPeriod.anchor,
+        isCurrent: analyticsPeriod.isCurrent,
         selectedPersonIds,
       },
       analyticsChart: buildAnalyticsChart(analyticsDrinks, analyticsPeriod),
@@ -631,6 +645,8 @@ export async function loader({ request }: Route.LoaderArgs) {
       allDrinksRows: [],
       analytics: {
         range: analyticsRange,
+        anchor: analyticsPeriod.anchor,
+        isCurrent: analyticsPeriod.isCurrent,
         selectedPersonIds: [],
       },
       analyticsChart: buildAnalyticsChart([], analyticsPeriod),
@@ -763,6 +779,27 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     : selectedPeople.length === 1
       ? (selectedPeople[0].display_name ?? selectedPeople[0].name)
       : `${selectedPeople.length} people`;
+  const analyticsAnchor =
+    analytics.range === "week" || analytics.range === "month"
+      ? analytics.anchor
+      : null;
+  const previousAnalyticsPeriodHref = analyticsAnchor
+    ? getAnalyticsHref(
+        analytics.range,
+        analytics.selectedPersonIds,
+        drinksPagination.page,
+        shiftAnalyticsAnchor(analyticsAnchor, analytics.range, -1),
+      )
+    : null;
+  const nextAnalyticsPeriodHref =
+    analyticsAnchor && !analytics.isCurrent
+      ? getAnalyticsHref(
+          analytics.range,
+          analytics.selectedPersonIds,
+          drinksPagination.page,
+          shiftAnalyticsAnchor(analyticsAnchor, analytics.range, 1),
+        )
+      : null;
 
   return (
     <section className="mx-auto grid max-w-6xl gap-4 px-4 py-8 sm:px-6 lg:grid-cols-4 lg:px-8">
@@ -1007,6 +1044,50 @@ export default function Home({ loaderData }: Route.ComponentProps) {
               </Link>
             ))}
           </div>
+          {previousAnalyticsPeriodHref && (
+            <div
+              role="group"
+              aria-label="Navigate between analytics periods"
+              className="flex rounded-md border border-zinc-800 bg-zinc-950 p-1"
+            >
+              <Link
+                to={previousAnalyticsPeriodHref}
+                aria-label={`Show previous ${analytics.range}`}
+                className={buttonVariants({
+                  variant: "ghost",
+                  size: "icon-sm",
+                  className: "text-zinc-400 shadow-none",
+                })}
+              >
+                <ChevronLeft aria-hidden="true" />
+              </Link>
+              {nextAnalyticsPeriodHref ? (
+                <Link
+                  to={nextAnalyticsPeriodHref}
+                  aria-label={`Show next ${analytics.range}`}
+                  className={buttonVariants({
+                    variant: "ghost",
+                    size: "icon-sm",
+                    className: "text-zinc-400 shadow-none",
+                  })}
+                >
+                  <ChevronRight aria-hidden="true" />
+                </Link>
+              ) : (
+                <span
+                  aria-hidden="true"
+                  className={buttonVariants({
+                    variant: "ghost",
+                    size: "icon-sm",
+                    className:
+                      "pointer-events-none text-zinc-600 opacity-50 shadow-none",
+                  })}
+                >
+                  <ChevronRight />
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -1034,6 +1115,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                   analytics.range,
                   people.map((person) => person.id),
                   drinksPagination.page,
+                  analytics.anchor,
                 )}
                 className={cn(
                   "font-semibold uppercase",
@@ -1061,6 +1143,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                         person.id,
                       ),
                       drinksPagination.page,
+                      analytics.anchor,
                     )}
                   >
                     <span className="flex size-4 items-center justify-center">
@@ -2423,6 +2506,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                       drinksPagination.page - 1,
                       analytics.range,
                       analytics.selectedPersonIds,
+                      analytics.anchor,
                     )}
                     aria-disabled={drinksPagination.page <= 1}
                     className={
@@ -2439,6 +2523,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                         page,
                         analytics.range,
                         analytics.selectedPersonIds,
+                        analytics.anchor,
                       )}
                       isActive={page === drinksPagination.page}
                     >
@@ -2452,6 +2537,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                       drinksPagination.page + 1,
                       analytics.range,
                       analytics.selectedPersonIds,
+                      analytics.anchor,
                     )}
                     aria-disabled={
                       drinksPagination.page >= drinksPagination.totalPages
@@ -2476,6 +2562,7 @@ function getAnalyticsHref(
   range: AnalyticsRange,
   personIds: number[],
   drinksPage = 1,
+  anchor: string | null = null,
 ) {
   const searchParams = new URLSearchParams({ range });
 
@@ -2487,6 +2574,10 @@ function getAnalyticsHref(
     searchParams.set("drinksPage", String(drinksPage));
   }
 
+  if (anchor && (range === "week" || range === "month")) {
+    searchParams.set("anchor", anchor);
+  }
+
   return `/?${searchParams.toString()}`;
 }
 
@@ -2494,8 +2585,9 @@ function getDrinksPageHref(
   page: number,
   range: AnalyticsRange,
   personIds: number[],
+  anchor: string | null,
 ) {
-  return getAnalyticsHref(range, personIds, Math.max(1, page));
+  return getAnalyticsHref(range, personIds, Math.max(1, page), anchor);
 }
 
 function togglePersonFilter(selectedPersonIds: number[], personId: number) {
@@ -2593,9 +2685,30 @@ function parseAnalyticsRange(value: string | null): AnalyticsRange {
     : "month";
 }
 
+function parseAnalyticsAnchor(value: string | null) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? "");
+
+  if (!match) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const anchorMs = Date.UTC(year, month - 1, day);
+  const anchorDate = new Date(anchorMs);
+
+  return anchorDate.getUTCFullYear() === year &&
+    anchorDate.getUTCMonth() === month - 1 &&
+    anchorDate.getUTCDate() === day
+    ? anchorMs
+    : null;
+}
+
 function getAnalyticsPeriod(
   range: AnalyticsRange,
   now = new Date(),
+  anchorValue: string | null = null,
 ): AnalyticsPeriod {
   const parts = getCopenhagenDateParts(now);
   const todayMs = Date.UTC(parts.year, parts.month - 1, parts.day);
@@ -2603,6 +2716,8 @@ function getAnalyticsPeriod(
   if (range === "all") {
     return {
       range,
+      anchor: null,
+      isCurrent: true,
       title: "All time",
       subtitle: "All recorded data",
       localStartMs: null,
@@ -2618,10 +2733,12 @@ function getAnalyticsPeriod(
   let title: string;
   let subtitle: string;
   let buckets: AnalyticsPeriod["buckets"];
+  let isCurrent: boolean;
 
   if (range === "today") {
     localStartMs = todayMs;
     localEndMs = todayMs + ONE_DAY_MS;
+    isCurrent = true;
     title = "Today";
     subtitle = shortDateFormatter.format(new Date(todayMs));
     buckets = Array.from({ length: 24 }, (_, hour) => ({
@@ -2629,10 +2746,22 @@ function getAnalyticsPeriod(
       label: `${String(hour).padStart(2, "0")}:00`,
     }));
   } else if (range === "week") {
-    const mondayOffset = (new Date(todayMs).getUTCDay() + 6) % 7;
-    localStartMs = todayMs - mondayOffset * ONE_DAY_MS;
+    const requestedAnchorMs = parseAnalyticsAnchor(anchorValue);
+    const selectedDateMs =
+      requestedAnchorMs !== null && requestedAnchorMs <= todayMs
+        ? requestedAnchorMs
+        : todayMs;
+    const currentMondayOffset = (new Date(todayMs).getUTCDay() + 6) % 7;
+    const currentWeekStartMs = todayMs - currentMondayOffset * ONE_DAY_MS;
+    const selectedMondayOffset =
+      (new Date(selectedDateMs).getUTCDay() + 6) % 7;
+
+    localStartMs = selectedDateMs - selectedMondayOffset * ONE_DAY_MS;
     localEndMs = localStartMs + 7 * ONE_DAY_MS;
-    title = "This week";
+    isCurrent = localStartMs === currentWeekStartMs;
+    title = isCurrent
+      ? "This week"
+      : `Week of ${shortDateFormatter.format(new Date(localStartMs))}`;
     subtitle = `${shortDateFormatter.format(new Date(localStartMs))}–${shortDateFormatter.format(new Date(localEndMs - ONE_DAY_MS))}`;
     buckets = Array.from({ length: 7 }, (_, index) => {
       const dateMs = localStartMs + index * ONE_DAY_MS;
@@ -2643,10 +2772,27 @@ function getAnalyticsPeriod(
       };
     });
   } else {
-    localStartMs = Date.UTC(parts.year, parts.month - 1, 1);
-    localEndMs = Date.UTC(parts.year, parts.month, 1);
+    const requestedAnchorMs = parseAnalyticsAnchor(anchorValue);
+    const selectedDateMs =
+      requestedAnchorMs !== null && requestedAnchorMs <= todayMs
+        ? requestedAnchorMs
+        : todayMs;
+    const selectedDate = new Date(selectedDateMs);
+    const currentMonthStartMs = Date.UTC(parts.year, parts.month - 1, 1);
+
+    localStartMs = Date.UTC(
+      selectedDate.getUTCFullYear(),
+      selectedDate.getUTCMonth(),
+      1,
+    );
+    localEndMs = Date.UTC(
+      selectedDate.getUTCFullYear(),
+      selectedDate.getUTCMonth() + 1,
+      1,
+    );
+    isCurrent = localStartMs === currentMonthStartMs;
     title = copenhagenMonthTitleFormatter.format(new Date(localStartMs));
-    subtitle = "This month";
+    subtitle = isCurrent ? "This month" : title;
     const daysInMonth = Math.round((localEndMs - localStartMs) / ONE_DAY_MS);
     buckets = Array.from({ length: daysInMonth }, (_, index) => {
       const dateMs = localStartMs + index * ONE_DAY_MS;
@@ -2660,6 +2806,8 @@ function getAnalyticsPeriod(
 
   return {
     range,
+    anchor: getLocalDateKey(new Date(localStartMs)),
+    isCurrent,
     title,
     subtitle,
     localStartMs,
@@ -2668,6 +2816,30 @@ function getAnalyticsPeriod(
     queryEnd: new Date(localEndMs + ONE_DAY_MS).toISOString(),
     buckets,
   };
+}
+
+function shiftAnalyticsAnchor(
+  anchor: string,
+  range: AnalyticsRange,
+  direction: -1 | 1,
+) {
+  const anchorMs = parseAnalyticsAnchor(anchor);
+
+  if (anchorMs === null) {
+    return anchor;
+  }
+
+  const anchorDate = new Date(anchorMs);
+  const shiftedMs =
+    range === "month"
+      ? Date.UTC(
+          anchorDate.getUTCFullYear(),
+          anchorDate.getUTCMonth() + direction,
+          1,
+        )
+      : anchorMs + direction * 7 * ONE_DAY_MS;
+
+  return getLocalDateKey(new Date(shiftedMs));
 }
 
 function getMonthlyEconomyQueryPeriod(now: Date) {
