@@ -1762,7 +1762,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
               <p className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 text-center text-xs text-zinc-500">
                 {bestFriendStats[0].matchedDrinkCount}{" "}
                 {bestFriendStats[0].matchedDrinkCount === 1
-                  ? "kaffedate"
+                  ? "kaffedate 💔"
                   : "kaffedates ♥️"}
               </p>
             )}
@@ -2753,8 +2753,7 @@ function getAnalyticsPeriod(
         : todayMs;
     const currentMondayOffset = (new Date(todayMs).getUTCDay() + 6) % 7;
     const currentWeekStartMs = todayMs - currentMondayOffset * ONE_DAY_MS;
-    const selectedMondayOffset =
-      (new Date(selectedDateMs).getUTCDay() + 6) % 7;
+    const selectedMondayOffset = (new Date(selectedDateMs).getUTCDay() + 6) % 7;
 
     localStartMs = selectedDateMs - selectedMondayOffset * ONE_DAY_MS;
     localEndMs = localStartMs + 7 * ONE_DAY_MS;
