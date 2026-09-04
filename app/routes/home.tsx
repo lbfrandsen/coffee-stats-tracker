@@ -3060,7 +3060,8 @@ function buildCupDiversityScores(
     );
   }
 
-  return people
+  return [...people]
+    .sort((a, b) => a.id - b.id)
     .map((person) => {
       const usage = usageByPerson.get(person.id);
       const totalDrinkCount = usage?.totalDrinkCount ?? 0;
@@ -3093,14 +3094,7 @@ function buildCupDiversityScores(
         totalDrinkCount,
         registeredCupCount,
       };
-    })
-    .sort(
-      (a, b) =>
-        (b.score ?? -1) - (a.score ?? -1) ||
-        b.distinctCupCount - a.distinctCupCount ||
-        b.totalDrinkCount - a.totalDrinkCount ||
-        a.personName.localeCompare(b.personName),
-    );
+    });
 }
 
 function buildEarlyBirds(

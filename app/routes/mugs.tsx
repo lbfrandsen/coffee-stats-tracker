@@ -49,7 +49,7 @@ export default function Mugs({ loaderData }: Route.ComponentProps) {
           totalUses={getTotalUses("FCK Kop")}
           description="Det er uvist, hvor længe Paven har ejet FCK koppen, men det er tæt på at være lige så mange år, som han har tilbragt på denne Jord.
           Et kvalificeret gæt er, at koppen er fra 2007-8 stykker, og dermed selvsagt har stor affektionsværdi for manden, som pt. har det største koffeinproblem i lejligheden.
-          I dens spæde tid blev koppen mest brugt til sodavand og kakao, især når onkel Stig var på besøg, eftersom manden er Brøndby fan. I disse dage bruges den udelukkende til misbruget, og udgør en uproprtionel stor andel af det totale antal serveringer sammenlignet med antal kopper til rådighed.
+          I dens spæde tid blev koppen mest brugt til sodavand og kakao, især når onkel Stig var på besøg, eftersom manden er Brøndbyfan. I disse dage bruges den udelukkende til misbruget, og udgør en uproportionel stor andel af det totale antal serveringer sammenlignet med antal kopper til rådighed.
           Naturligvis står den også tilbage som minde om en tid, hvor FCK lignede et hold, som på et tidspunkt havde set en fodbold før i deres liv. Det var tider."
         />
 
@@ -58,8 +58,8 @@ export default function Mugs({ loaderData }: Route.ComponentProps) {
           alt="blå-ikea-kop"
           title="Den Blå IKEA Kop"
           totalUses={getTotalUses("Blå IKEA Kop")}
-          description="I sommeren 2026 får Burger Lars et nyt bekendtskab, som, i modsætning til ham selv, har to X-kromosomer og ikke ét af hver. Hun viser sig at være rigtig dygtig til det såkaldte latté art - så selvfølgelig skal Burger Lars dermed være barista.
-          Førnævnte kvinde har ladet sig fortælle, at en lavere og bredere kop (samt mælk med høj fedtprocent) er idéel til latté arten - og hermed er Den Blå IKEA kop født. Hvad man ikke gør for kvinder."
+          description="I sommeren 2026 får Burger Lars et nyt bekendtskab, som, i modsætning til ham selv, har to X-kromosomer og ikke ét af hver. Hun viser sig at være rigtig dygtig til det såkaldte latte art - så selvfølgelig skal Burger Lars dermed være barista.
+          Førnævnte kvinde har ladet sig fortælle, at en lavere og bredere kop (samt mælk med høj fedtprocent) er ideel til latte arten - og hermed er Den Blå IKEA kop født. Hvad man ikke gør for kvinder."
           imageSide="right"
         />
 
@@ -76,17 +76,17 @@ export default function Mugs({ loaderData }: Route.ComponentProps) {
 
         <MugCard
           image="https://assets.kaffe.lucasfrandsen.dk/mugs-pics/eva-trio-cup.webp"
-          alt="eva-trio-kop"
-          title="Eva-Trio Koppen"
+          alt="Eva Trio-kop"
+          title="Eva Trio Koppen"
           totalUses={getTotalUses("Eva Trio Kop")}
-          description="Der er ikke så meget at sige om Eva-Trio koppen. Den tilhører Burgar Lars, og han har fået den af sin familie.
+          description="Der er ikke så meget at sige om Eva Trio koppen. Den tilhører Burgar Lars, og han har fået den af sin familie.
           Den er fin at drikke af, mærket tager grotesk overpris for en gennemsnitlig kop, som er markant mindre værd end den sælges for - minder lidt om et andet mærke, vi har gennemgået allerede."
           imageSide="right"
         />
 
         <MugCard
           image="https://assets.kaffe.lucasfrandsen.dk/mugs-pics/munchen-kop.webp"
-          alt="fck-kop"
+          alt="munich-kop"
           title="München Koppen"
           totalUses={getTotalUses("München Kop")}
           description="I efteråret 2025 er Paven på udveksling i det nordlige Norge, og inden for to uger smadrer han sin eneste kaffekop - med et koffeinproblem af den størrelse her, så er det jo en katastrofe.
