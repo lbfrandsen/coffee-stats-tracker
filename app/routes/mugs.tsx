@@ -136,6 +136,14 @@ export default function Mugs({ loaderData }: Route.ComponentProps) {
           description=""
           imageSide="right"
         />
+
+        <MugCard
+          image="https://assets.kaffe.lucasfrandsen.dk/placeholder.webp"
+          alt="græker-koppen"
+          title="Græker Koppen"
+          totalUses={getTotalUses("Kræker Koppen")}
+          description=""
+        />
       </section>
     </main>
   );
