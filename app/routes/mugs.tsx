@@ -131,7 +131,7 @@ export default function Mugs({ loaderData }: Route.ComponentProps) {
         <MugCard
           image="https://assets.kaffe.lucasfrandsen.dk/placeholder.webp"
           alt="gryffindor-kop"
-          title="Gryffindor Kop"
+          title="Gryffindor Koppen"
           totalUses={getTotalUses("Gryffindor Kop")}
           description=""
           imageSide="right"
