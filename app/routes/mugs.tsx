@@ -127,6 +127,15 @@ export default function Mugs({ loaderData }: Route.ComponentProps) {
           totalUses={getTotalUses("Gastro Hospitalskoppen")}
           description="En kaffekop, som minder til forveksling meget om dem, der benyttes af personalet på Hvidovre Hospital. Ligesom med DTU Kemi Koppen, skal man ikke tænke for meget over, hvordan den er endt i samlingen."
         />
+
+        <MugCard
+          image="https://assets.kaffe.lucasfrandsen.dk/placeholder.webp"
+          alt="gryffindor-kop"
+          title="Gryffindor Kop"
+          totalUses={getTotalUses("Gryffindor Kop")}
+          description=""
+          imageSide="right"
+        />
       </section>
     </main>
   );
