@@ -133,7 +133,7 @@ export default function Mugs({ loaderData }: Route.ComponentProps) {
           alt="gryffindor-kop"
           title="Gryffindor Koppen"
           totalUses={getTotalUses("Gryffindor Kop")}
-          description=""
+          description="Gryffindor koppen er den første kop i samlingen, som ikke er ejet af enten Paven eller Burger Lars - så et stort øjeblik for lejligheden. Nej, Gryffindor koppen tilhører Frederikke, som Paven hver dag er stolt og taknemmelig over at kunne kalde sin kæreste. Den er i købt i prestige-shoppen Fætter BR (ja, nu har du den også på hjernen), og er mærkeligt velegnet til latte art, samtidig med at den repræsenterer Frederikkes kærlighed til Harry Potter - omend hun ikke riiigtig er en Gryffindor type, tror mere vi er ovre i Hufflepuff for at være ærlig."
           imageSide="right"
         />
 
@@ -141,8 +141,8 @@ export default function Mugs({ loaderData }: Route.ComponentProps) {
           image="https://assets.kaffe.lucasfrandsen.dk/placeholder.webp"
           alt="græker-koppen"
           title="Græker Koppen"
-          totalUses={getTotalUses("Kræker Koppen")}
-          description=""
+          totalUses={getTotalUses("Græker Koppen")}
+          description="Der er ikke så meget at sige om Græker koppen. Den er købt i Grækenland, den er en del af samlingen, og den er træls at drikke af og holde på."
         />
       </section>
     </main>
