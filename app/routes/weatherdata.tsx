@@ -617,10 +617,7 @@ export default function WeatherData() {
               <span
                 className="font-medium"
                 style={{
-                  color: getPersonDisplayColor(
-                    latestCupWeather.person_name,
-                    latestCupWeather.person_id,
-                  ),
+                  color: getPersonDisplayColor(latestCupWeather.person_name),
                 }}
               >
                 {latestCupWeather.person_name}
@@ -731,10 +728,7 @@ export default function WeatherData() {
                       <span
                         className="text-right font-medium"
                         style={{
-                          color: getPersonDisplayColor(
-                            person.personName,
-                            person.personId,
-                          ),
+                          color: getPersonDisplayColor(person.personName),
                         }}
                       >
                         {person.personName}
@@ -945,10 +939,7 @@ export default function WeatherData() {
                     <span
                       className="font-medium"
                       style={{
-                        color: getPersonDisplayColor(
-                          coldestCup.person_name,
-                          coldestCup.person_id,
-                        ),
+                        color: getPersonDisplayColor(coldestCup.person_name),
                       }}
                     >
                       {coldestCup.person_name}
@@ -986,10 +977,7 @@ export default function WeatherData() {
                     <span
                       className="font-medium"
                       style={{
-                        color: getPersonDisplayColor(
-                          warmestCup.person_name,
-                          warmestCup.person_id,
-                        ),
+                        color: getPersonDisplayColor(warmestCup.person_name),
                       }}
                     >
                       {warmestCup.person_name}
@@ -1027,10 +1015,7 @@ export default function WeatherData() {
                     <span
                       className="font-medium"
                       style={{
-                        color: getPersonDisplayColor(
-                          wettestCup.person_name,
-                          wettestCup.person_id,
-                        ),
+                        color: getPersonDisplayColor(wettestCup.person_name),
                       }}
                     >
                       {wettestCup.person_name}
@@ -1070,10 +1055,7 @@ export default function WeatherData() {
                     <span
                       className="font-medium"
                       style={{
-                        color: getPersonDisplayColor(
-                          windiestCup.person_name,
-                          windiestCup.person_id,
-                        ),
+                        color: getPersonDisplayColor(windiestCup.person_name),
                       }}
                     >
                       {windiestCup.person_name}
@@ -1103,10 +1085,7 @@ export default function WeatherData() {
             <CardTitle
               className="uppercase"
               style={{
-                color: getPersonDisplayColor(
-                  "Paven",
-                  personWeatherProfiles.paven?.person_id ?? 0,
-                ),
+                color: getPersonDisplayColor("Paven"),
               }}
             >
               Paven
@@ -1231,10 +1210,7 @@ export default function WeatherData() {
             <CardTitle
               className="uppercase"
               style={{
-                color: getPersonDisplayColor(
-                  "Burger Lars",
-                  personWeatherProfiles.burgerLars?.person_id ?? 0,
-                ),
+                color: getPersonDisplayColor("Burger Lars"),
               }}
             >
               Burger Lars

@@ -887,10 +887,10 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                     content={<ChartTooltipContent hideLabel />}
                   />
                   <Bar dataKey="cups" barSize={10} radius={[0, 4, 4, 0]}>
-                    {leaderboardChartData.map((row, index) => (
+                    {leaderboardChartData.map((row) => (
                       <Cell
                         key={row.rank}
-                        fill={getPersonDisplayColor(row.name, index)}
+                        fill={getPersonDisplayColor(row.name)}
                       />
                     ))}
                     <LabelList
@@ -1281,7 +1281,6 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                         : {
                             color: getPersonDisplayColor(
                               doublekill.personName,
-                              doublekill.personId,
                             ),
                           }
                     }
@@ -1351,10 +1350,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                       cooldown.intervalMs === null
                         ? undefined
                         : {
-                            color: getPersonDisplayColor(
-                              cooldown.personName,
-                              cooldown.personId,
-                            ),
+                            color: getPersonDisplayColor(cooldown.personName),
                           }
                     }
                   >
@@ -1390,10 +1386,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                     style={
                       earlyBird.consumedAt
                         ? {
-                            color: getPersonDisplayColor(
-                              earlyBird.personName,
-                              earlyBird.personId,
-                            ),
+                            color: getPersonDisplayColor(earlyBird.personName),
                           }
                         : undefined
                     }
@@ -1453,10 +1446,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                       rapidFire.averageIntervalMs === null
                         ? undefined
                         : {
-                            color: getPersonDisplayColor(
-                              rapidFire.personName,
-                              rapidFire.personId,
-                            ),
+                            color: getPersonDisplayColor(rapidFire.personName),
                           }
                     }
                   >
@@ -1499,10 +1489,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                       loyalist.percentage === null
                         ? undefined
                         : {
-                            color: getPersonDisplayColor(
-                              loyalist.personName,
-                              loyalist.personId,
-                            ),
+                            color: getPersonDisplayColor(loyalist.personName),
                           }
                     }
                   >
@@ -1550,10 +1537,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                     style={
                       nightOwl.consumedAt
                         ? {
-                            color: getPersonDisplayColor(
-                              nightOwl.personName,
-                              nightOwl.personId,
-                            ),
+                            color: getPersonDisplayColor(nightOwl.personName),
                           }
                         : undefined
                     }
@@ -1591,10 +1575,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                       primetime.hour === null
                         ? undefined
                         : {
-                            color: getPersonDisplayColor(
-                              primetime.personName,
-                              primetime.personId,
-                            ),
+                            color: getPersonDisplayColor(primetime.personName),
                           }
                     }
                   >
@@ -1669,10 +1650,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                       diversity.score === null
                         ? undefined
                         : {
-                            color: getPersonDisplayColor(
-                              diversity.personName,
-                              diversity.personId,
-                            ),
+                            color: getPersonDisplayColor(diversity.personName),
                           }
                     }
                   >
@@ -1735,10 +1713,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
           <CardContent className="relative">
             <div className="space-y-5">
               {bestFriendStats.map((friend) => {
-                const color = getPersonDisplayColor(
-                  friend.personName,
-                  friend.personId,
-                );
+                const color = getPersonDisplayColor(friend.personName);
 
                 return (
                   <div
@@ -1762,8 +1737,9 @@ export default function Home({ loaderData }: Route.ComponentProps) {
               <p className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 text-center text-xs text-zinc-500">
                 {bestFriendStats[0].matchedDrinkCount}{" "}
                 {bestFriendStats[0].matchedDrinkCount === 1
-                  ? "kaffedate 💔"
-                  : "kaffedates ♥️"}
+                  ? "kaffedate"
+                  : "kaffedates"}{" "}
+                {bestFriendStats[0].matchedDrinkCount === 0 ? "💔" : "♥️"}
               </p>
             )}
           </CardContent>
@@ -1862,7 +1838,6 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                       ? {
                           color: getPersonDisplayColor(
                             allTimeRecords.mostCupsInDay.personName,
-                            allTimeRecords.mostCupsInDay.personId,
                           ),
                         }
                       : undefined
@@ -1933,7 +1908,6 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                       ? {
                           color: getPersonDisplayColor(
                             allTimeRecords.earliestCup.personName,
-                            allTimeRecords.earliestCup.personId,
                           ),
                         }
                       : undefined
@@ -3569,7 +3543,7 @@ function buildEconomyAnalytics(
         id: person.id,
         name,
         dataKey: `economy_person_${person.id}`,
-        color: getPersonDisplayColor(name, person.id),
+        color: getPersonDisplayColor(name),
       };
     });
   const countsByBucket = new Map<string, Map<number, number>>();
@@ -3949,11 +3923,11 @@ function buildAnalyticsChart(
 
   const people: AnalyticsChartPerson[] = [...peopleById.values()]
     .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
-    .map((person, index) => ({
+    .map((person) => ({
       id: person.id,
       name: person.name,
       dataKey: person.dataKey,
-      color: getPersonDisplayColor(person.name, index),
+      color: getPersonDisplayColor(person.name),
     }));
 
   const personColorById = new Map(
@@ -3968,7 +3942,7 @@ function buildAnalyticsChart(
       total: cup.total,
       color:
         personColorById.get(cup.ownerId) ??
-        getPersonDisplayColor(cup.ownerName, cup.ownerId),
+        getPersonDisplayColor(cup.ownerName),
     }));
 
   const periodBuckets =
