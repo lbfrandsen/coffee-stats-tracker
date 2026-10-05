@@ -1,9 +1,9 @@
 [Unit]
-Description=Run Coffee Tracker heartbeat every 30 minutes
+Description=Run Coffee Tracker heartbeat every 4 hours
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=30min
+OnUnitActiveSec=4h
 Persistent=true
 
 [Install]
