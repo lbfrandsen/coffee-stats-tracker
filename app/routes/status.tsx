@@ -26,9 +26,9 @@ import {
   TableRow,
 } from "~/components/ui/table";
 import {
+  APP_TIME_ZONE,
   formatDateTime,
   formatRelativeAge,
-  formatTime,
   getTimestampMilliseconds,
 } from "~/lib/date-time";
 
@@ -52,11 +52,43 @@ type CountRow = {
   total: number;
 };
 
-type DeviceStatus = "online" | "stale" | "offline";
+type LatestScanRow = {
+  received_at: string;
+};
+
+type AvailabilityHeartbeatRow = {
+  received_at: string;
+};
+
+type AvailabilityDay = {
+  date: string;
+  label: string;
+  available: boolean;
+};
+
+type DeviceStatus = "online" | "concerning" | "offline";
 
 const HEARTBEATS_PER_PAGE = 20;
-const ONLINE_THRESHOLD_MS = 90 * 60 * 1000;
-const STALE_THRESHOLD_MS = 150 * 60 * 1000;
+const AVAILABILITY_DAYS = 30;
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+// The Pi sends a heartbeat every four hours.
+const ONLINE_THRESHOLD_MS = 9 * HOUR_MS;
+const OFFLINE_THRESHOLD_MS = 13 * HOUR_MS;
+
+const availabilityDateKeyFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: APP_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+const availabilityDateLabelFormatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: APP_TIME_ZONE,
+  day: "numeric",
+  month: "short",
+});
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -70,6 +102,9 @@ export function meta({}: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const statusEvaluatedAt = Date.now();
+  const availabilityWindowStart =
+    statusEvaluatedAt - AVAILABILITY_DAYS * DAY_MS;
+  const availabilityQueryStart = availabilityWindowStart - ONLINE_THRESHOLD_MS;
   const url = new URL(request.url);
   const requestedHeartbeatsPage = Number.parseInt(
     url.searchParams.get("heartbeatsPage") ?? "1",
@@ -81,32 +116,51 @@ export async function loader({ request }: Route.LoaderArgs) {
       : 1;
 
   try {
-    const [countRow, latestHeartbeat] = await Promise.all([
-      env.DB.prepare(
-        "SELECT COUNT(*) AS total FROM heartbeats",
-      ).first<CountRow>(),
-      env.DB.prepare(
-        `
-          SELECT
-            id,
-            reported_at,
-            received_at,
-            service_status,
-            reader_connected,
-            uptime_seconds,
-            memory_usage_percent,
-            disk_usage_percent,
-            cpu_temperature_celsius,
-            last_scan_at,
-            last_upload_at,
-            pending_events,
-            app_version
-          FROM heartbeats
-          ORDER BY received_at DESC, id DESC
-          LIMIT 1
-        `,
-      ).first<HeartbeatRow>(),
-    ]);
+    const [countRow, latestHeartbeat, latestScan, availabilityResult] =
+      await Promise.all([
+        env.DB.prepare(
+          "SELECT COUNT(*) AS total FROM heartbeats",
+        ).first<CountRow>(),
+        env.DB.prepare(
+          `
+            SELECT
+              id,
+              reported_at,
+              received_at,
+              service_status,
+              reader_connected,
+              uptime_seconds,
+              memory_usage_percent,
+              disk_usage_percent,
+              cpu_temperature_celsius,
+              last_scan_at,
+              last_upload_at,
+              pending_events,
+              app_version
+            FROM heartbeats
+            ORDER BY received_at DESC, id DESC
+            LIMIT 1
+          `,
+        ).first<HeartbeatRow>(),
+        env.DB.prepare(
+          `
+            SELECT received_at
+            FROM drinks
+            ORDER BY received_at DESC, id DESC
+            LIMIT 1
+          `,
+        ).first<LatestScanRow>(),
+        env.DB.prepare(
+          `
+            SELECT received_at
+            FROM heartbeats
+            WHERE received_at >= datetime(?, 'unixepoch')
+            ORDER BY received_at ASC, id ASC
+          `,
+        )
+          .bind(Math.floor(availabilityQueryStart / 1000))
+          .all<AvailabilityHeartbeatRow>(),
+      ]);
 
     const totalHeartbeats = countRow?.total ?? 0;
     const deviceStatus = getDeviceStatus(
@@ -119,6 +173,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     );
     const currentHeartbeatsPage = Math.min(heartbeatsPage, totalPages);
     const heartbeatsOffset = (currentHeartbeatsPage - 1) * HEARTBEATS_PER_PAGE;
+    const availabilityDays = buildAvailabilityDays(
+      availabilityResult.results,
+      statusEvaluatedAt,
+      availabilityWindowStart,
+    );
 
     const { results } = await env.DB.prepare(
       `
@@ -147,6 +206,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     return {
       heartbeats: results,
       latestHeartbeat,
+      latestScanAt: latestScan?.received_at ?? null,
+      availabilityDays,
       deviceStatus,
       statusEvaluatedAt,
       heartbeatsPagination: {
@@ -162,6 +223,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     return {
       heartbeats: [],
       latestHeartbeat: null,
+      latestScanAt: null,
+      availabilityDays: buildAvailabilityDays(
+        [],
+        statusEvaluatedAt,
+        availabilityWindowStart,
+      ),
       deviceStatus: "offline" satisfies DeviceStatus,
       statusEvaluatedAt,
       heartbeatsPagination: {
@@ -179,6 +246,8 @@ export default function Status({ loaderData }: Route.ComponentProps) {
     heartbeats,
     heartbeatsPagination,
     latestHeartbeat,
+    latestScanAt,
+    availabilityDays,
     statusEvaluatedAt,
   } = loaderData;
   const deviceStatus = loaderData.deviceStatus as DeviceStatus;
@@ -228,50 +297,44 @@ export default function Status({ loaderData }: Route.ComponentProps) {
         </CardContent>
       </Card>
 
-      <Card className="border-zinc-800 bg-zinc-950/80">
-        <CardHeader className="border-b border-zinc-800">
-          <CardTitle>Current State</CardTitle>
-          <CardDescription>
-            Seneste heartbeat modtaget fra Raspberry'en.
-          </CardDescription>
-        </CardHeader>
+      <AvailabilityCard days={availabilityDays} />
+
+      <Card className="border-zinc-800 bg-zinc-950/80 ring-0">
         <CardContent>
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            <StatusMetric
-              label="Status"
-              value={capitalize(deviceStatus)}
-              valueClassName={statusStyles.text}
-            />
-            <StatusMetric
-              label="Last heartbeat"
-              value={formatOptionalDateTime(
-                latestHeartbeat?.received_at ?? null,
-              )}
-            />
-            <StatusMetric
-              label="Reader"
-              value={
-                latestHeartbeat?.reader_connected === 1
-                  ? "Connected"
-                  : "Disconnected"
-              }
-            />
-            <StatusMetric
-              label="Scanner service"
-              value={formatServiceStatus(latestHeartbeat?.service_status)}
-            />
-            <StatusMetric
-              label="Last scan"
-              value={formatOptionalTime(latestHeartbeat?.last_scan_at ?? null)}
-            />
-            <StatusMetric
-              label="Pending uploads"
-              value={`${latestHeartbeat?.pending_events ?? 0}`}
-            />
-            <StatusMetric
-              label="Version"
-              value={latestHeartbeat?.app_version || "—"}
-            />
+          <div className="grid items-start gap-6 lg:grid-cols-[1fr_auto_auto_auto] lg:gap-x-12">
+            <div className="text-left">
+              <StatusMetric
+                label="Last scan sent"
+                value={formatOptionalDateTime(latestScanAt)}
+              />
+            </div>
+
+            <div className="text-right">
+              <StatusMetric
+                label="Memory"
+                value={formatPercent(
+                  latestHeartbeat?.memory_usage_percent ?? null,
+                )}
+              />
+            </div>
+
+            <div className="text-right">
+              <StatusMetric
+                label="Disk"
+                value={formatPercent(
+                  latestHeartbeat?.disk_usage_percent ?? null,
+                )}
+              />
+            </div>
+
+            <div className="text-right">
+              <StatusMetric
+                label="CPU"
+                value={formatTemperature(
+                  latestHeartbeat?.cpu_temperature_celsius ?? null,
+                )}
+              />
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -280,7 +343,8 @@ export default function Status({ loaderData }: Route.ComponentProps) {
         <CardHeader className="border-b border-zinc-800">
           <CardTitle>Heartbeat History</CardTitle>
           <CardDescription>
-            Fuld rapportering af Raspberry'ens heartbeats.
+            Fuld rapportering af Raspberry'ens heartbeats. Sendes hver fjerde
+            time.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -420,6 +484,53 @@ export default function Status({ loaderData }: Route.ComponentProps) {
   );
 }
 
+function AvailabilityCard({ days }: { days: AvailabilityDay[] }) {
+  const availableDays = days.filter((day) => day.available).length;
+
+  return (
+    <Card className="border-zinc-800 bg-zinc-950/80 ring-0">
+      <CardContent>
+        <div
+          className="flex h-16 items-stretch gap-1 sm:gap-1.5"
+          aria-label={`${availableDays} of the last ${days.length} days had no detected downtime`}
+        >
+          {days.map((day) => (
+            <div
+              key={day.date}
+              className={`min-w-0 flex-1 rounded-sm transition-colors ${
+                day.available
+                  ? "bg-emerald-500/80 hover:bg-emerald-400"
+                  : "bg-red-500/80 hover:bg-red-400"
+              }`}
+              title={`${day.label}: ${
+                day.available ? "No downtime detected" : "Downtime detected"
+              }`}
+              role="img"
+              aria-label={`${day.label}: ${
+                day.available ? "no downtime detected" : "downtime detected"
+              }`}
+            />
+          ))}
+        </div>
+        <div className="mt-3 flex items-center justify-between text-xs text-zinc-500">
+          <span>{days[0]?.label ?? "30 days ago"}</span>
+          <div className="flex items-center gap-4" aria-hidden="true">
+            <span className="flex items-center gap-1.5">
+              <span className="size-2 rounded-full bg-emerald-500" />
+              Operational
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="size-2 rounded-full bg-red-500" />
+              Downtime
+            </span>
+          </div>
+          <span>Today</span>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function StatusMetric({
   label,
   value,
@@ -457,10 +568,6 @@ function getVisiblePages(currentPage: number, totalPages: number) {
 
 function formatOptionalDateTime(value: string | null) {
   return formatDateTime(value);
-}
-
-function formatOptionalTime(value: string | null) {
-  return formatTime(value);
 }
 
 function formatPercent(value: number | null) {
@@ -507,8 +614,8 @@ function getDeviceStatus(
     return "online";
   }
 
-  if (ageMs < STALE_THRESHOLD_MS) {
-    return "stale";
+  if (ageMs < OFFLINE_THRESHOLD_MS) {
+    return "concerning";
   }
 
   return "offline";
@@ -525,9 +632,9 @@ function getStatusStyles(status: DeviceStatus) {
     };
   }
 
-  if (status === "stale") {
+  if (status === "concerning") {
     return {
-      label: "STALE",
+      label: "CONCERNING",
       backgroundColor: "oklch(0.286 0.066 53.813)",
       borderColor: "oklch(0.681 0.162 75.834)",
       foregroundColor: "oklch(0.987 0.026 102.212)",
@@ -544,10 +651,99 @@ function getStatusStyles(status: DeviceStatus) {
   };
 }
 
-function formatServiceStatus(value: string | undefined) {
-  return value ? capitalize(value.replaceAll("_", " ")) : "—";
+function buildAvailabilityDays(
+  heartbeats: AvailabilityHeartbeatRow[],
+  statusEvaluatedAt: number,
+  windowStart: number,
+): AvailabilityDay[] {
+  const daysNewestFirst: AvailabilityDay[] = [];
+  const seenDates = new Set<string>();
+  let cursor = statusEvaluatedAt;
+
+  while (daysNewestFirst.length < AVAILABILITY_DAYS) {
+    const date = getAvailabilityDateKey(cursor);
+
+    if (!seenDates.has(date)) {
+      seenDates.add(date);
+      daysNewestFirst.push({
+        date,
+        label: availabilityDateLabelFormatter.format(cursor),
+        available: true,
+      });
+    }
+
+    cursor -= DAY_MS;
+  }
+
+  const days = daysNewestFirst.reverse();
+  const daysByDate = new Map(days.map((day) => [day.date, day]));
+  const heartbeatTimes = heartbeats
+    .map((heartbeat) => getTimestampMilliseconds(heartbeat.received_at))
+    .filter((timestamp): timestamp is number => timestamp !== null)
+    .sort((first, second) => first - second);
+
+  const markDowntime = (start: number, end: number) => {
+    const boundedStart = Math.max(start, windowStart);
+    const boundedEnd = Math.min(end, statusEvaluatedAt);
+
+    if (boundedStart >= boundedEnd) {
+      return;
+    }
+
+    const markTimestamp = (timestamp: number) => {
+      const day = daysByDate.get(getAvailabilityDateKey(timestamp));
+
+      if (day) {
+        day.available = false;
+      }
+    };
+
+    markTimestamp(boundedStart);
+    markTimestamp(boundedEnd - 1);
+
+    for (
+      let timestamp = Math.ceil(boundedStart / HOUR_MS) * HOUR_MS;
+      timestamp < boundedEnd;
+      timestamp += HOUR_MS
+    ) {
+      markTimestamp(timestamp);
+    }
+  };
+
+  if (heartbeatTimes.length === 0) {
+    markDowntime(windowStart, statusEvaluatedAt);
+    return days;
+  }
+
+  const firstHeartbeatAt = heartbeatTimes[0];
+
+  if (firstHeartbeatAt > windowStart) {
+    markDowntime(windowStart, firstHeartbeatAt);
+  }
+
+  for (let index = 1; index < heartbeatTimes.length; index += 1) {
+    const previousHeartbeatAt = heartbeatTimes[index - 1];
+    const heartbeatAt = heartbeatTimes[index];
+
+    if (heartbeatAt - previousHeartbeatAt > ONLINE_THRESHOLD_MS) {
+      markDowntime(previousHeartbeatAt + ONLINE_THRESHOLD_MS, heartbeatAt);
+    }
+  }
+
+  const latestHeartbeatAt = heartbeatTimes.at(-1)!;
+
+  if (statusEvaluatedAt - latestHeartbeatAt > ONLINE_THRESHOLD_MS) {
+    markDowntime(latestHeartbeatAt + ONLINE_THRESHOLD_MS, statusEvaluatedAt);
+  }
+
+  return days;
 }
 
-function capitalize(value: string) {
-  return value.charAt(0).toUpperCase() + value.slice(1);
+function getAvailabilityDateKey(timestamp: number) {
+  const parts = availabilityDateKeyFormatter.formatToParts(timestamp);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+
+  return `${year}-${month}-${day}`;
 }
