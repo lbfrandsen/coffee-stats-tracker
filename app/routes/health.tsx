@@ -366,7 +366,7 @@ export default function Health({ loaderData }: Route.ComponentProps) {
                   Vil være &lt;10 mg:
                 </p>
                 <p className="mt-1 text-lg font-semibold text-zinc-50">
-                  {summary.effectivelyZeroAt ?? "Now"}
+                  {summary.effectivelyZeroAt ?? "Nu"}
                 </p>
                 <p className="mt-1 text-xs text-zinc-400">
                   Hvis ingen koffein indtages fra nu af
