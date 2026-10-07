@@ -6,4 +6,5 @@ export default [
   route("status", "routes/status.tsx"),
   route("mugs", "routes/mugs.tsx"),
   route("weatherdata", "routes/weatherdata.tsx"),
+  route("health", "routes/health.tsx"),
 ] satisfies RouteConfig;
